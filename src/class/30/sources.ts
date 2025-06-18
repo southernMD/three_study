@@ -1,0 +1,29 @@
+export default [
+    {
+        name:'environmentMapTexture',
+        type:'cubeTexture',
+        paths:[
+            '/30/textures/environmentMap/px.jpg',
+            '/30/textures/environmentMap/nx.jpg',
+            '/30/textures/environmentMap/py.jpg',
+            '/30/textures/environmentMap/ny.jpg',
+            '/30/textures/environmentMap/pz.jpg',
+            '/30/textures/environmentMap/nz.jpg'
+        ]
+    },
+    {
+        name:'grassColorTexture',
+        type:'texture',
+        path:'/30/textures/dirt/color.jpg'
+    },
+    {
+        name:'grassNormalTexture',
+        type:'texture',
+        path:'/30/textures/dirt/normal.jpg'
+    },
+    {
+        name:'foxModel',
+        type:'gltf',
+        path:'/30/models/Fox/glTF/Fox.gltf'
+    }
+]
