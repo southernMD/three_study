@@ -20,6 +20,7 @@ import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 // 导入MMDModel类
 import { MMDModel } from '../models/MMDModel';
 import { GLTFModel } from '../models/GLTFModel';
+import { StaticGeometryGenerator, MeshBVH, MeshBVHHelper } from 'three-mesh-bvh';
 
 // 添加全局声明
 declare global {
@@ -37,10 +38,12 @@ declare global {
       boxHelper?: THREE.BoxHelper;
       capsuleVisual?: THREE.Mesh;
       octreeHelpers?: THREE.Object3D[];
+      bvhHelpers?: THREE.Object3D[];
     };
     cameraHelpers?: {
       lookCameraHelper?: THREE.CameraHelper;
     };
+    worldBVHMeshes?: THREE.Mesh[];
   }
 }
 
@@ -105,6 +108,27 @@ gui.add(guiFn, 'toggleHelpers').name('显示/隐藏人物辅助线')
 gui.add(guiFn, 'forceWalk').name('播放走路动画')
 gui.add(guiFn, 'forceStand').name('播放站立动画')
 gui.add(guiFn, 'createBoxHere').name('在当前位置创建箱子')
+
+// 添加一个显示BVH信息的按钮
+gui.add({
+  showBVHInfo: () => {
+    if (window.worldBVHMeshes && window.worldBVHMeshes.length > 0) {
+      const mesh = window.worldBVHMeshes[0];
+      console.log('BVH信息：', mesh.geometry.boundsTree);
+      console.log('是否有boundsTree:', !!mesh.geometry.boundsTree);
+      // 创建一个BoxHelper来显示BVH根节点的边界框
+      if (mesh.geometry.boundsTree) {
+        const box = new THREE.Box3();
+        mesh.geometry.boundsTree.getBoundingBox(box);
+        const boxHelper = new THREE.Box3Helper(box, 0xff0000);
+        scene.add(boxHelper);
+      }
+    } else {
+      console.log('没有找到带BVH的网格！');
+    }
+  }
+}, 'showBVHInfo').name('显示BVH信息');
+
 const gridHelper = new GridHelper(1000, 100, 0x444444, 0x444444);
 scene.add(gridHelper);
 
@@ -122,12 +146,13 @@ onMounted(() => {
     createBox(0xffff00, new THREE.Vector3(0, 5, 105))
     createBox(0x66ccff, new THREE.Vector3(105, 5, 0))
     createBox(0xff00fff, new THREE.Vector3(-105, 5, 0))
-    createBox(0xff00fff, new THREE.Vector3(0, 55, 0))
+    createBox(0x66ccff, new THREE.Vector3(50, 70, 50))
+    // createBox(0xff00fff, new THREE.Vector3(0, 55, 0))
     
     // 创建不同角度的斜坡用于测试
-    createRamp(new THREE.Vector3(20, 0, -20), new THREE.Vector3(15, 2, 30), 15, 0x8B4513); // 15度斜坡
-    createRamp(new THREE.Vector3(-20, 0, -20), new THREE.Vector3(15, 2, 30), 25, 0xA0522D); // 25度斜坡
-    createRamp(new THREE.Vector3(0, 0, -60), new THREE.Vector3(40, 2, 15), 20, 0xD2691E); // 宽一点的20度斜坡
+    // createRamp(new THREE.Vector3(20, 0, -20), new THREE.Vector3(15, 2, 30), 15, 0x8B4513); // 15度斜坡
+    // createRamp(new THREE.Vector3(-20, 0, -20), new THREE.Vector3(15, 2, 30), 25, 0xA0522D); // 25度斜坡
+    createRamp(new THREE.Vector3(0, 0, -60), new THREE.Vector3(80, 2, 55), 20, 0xD2691E); // 宽一点的20度斜坡
     
     lookCamera = mmdModel.createLookCamera(scene)
     hadRenderCamera = camera
@@ -235,34 +260,30 @@ function createAxesHelper() {
 
 async function loadModel() {
   mmdModel = new GLTFModel();
-  await mmdModel.load(scene, '/model/test.glb');
+  await mmdModel.load(scene, '/model/newtest.glb');
   // mmdModel = new MMDModel();
   // await mmdModel.load(scene, '/lm/楈柌v2.pmx', '/lm/走路.vmd', '/lm/站立.vmd');
 }
 
 function createBox(color: THREE.ColorRepresentation, position: THREE.Vector3) {
-  const boxGeometry = new THREE.BoxGeometry(10, 10, 10);
+  const boxGeometry = new THREE.BoxGeometry(10, 100, 10);
   const boxMaterial = new THREE.MeshStandardMaterial({ color });
   const box = new THREE.Mesh(boxGeometry, boxMaterial);
   box.position.set(position.x, position.y, position.z);
   scene.add(box);
   
-  // 创建8叉树用于碰撞检测
-  const worldOctree = new Octree();
-  worldOctree.fromGraphNode(box);
-  const octreeHelper = new OctreeHelper(worldOctree);
-  scene.add(octreeHelper);
+  // 为几何体创建BVH
+  boxGeometry.boundsTree = new MeshBVH(boxGeometry);
   
-  // 保存八叉树引用，用于后续碰撞检测
-  if (!window.worldOctrees) {
-    window.worldOctrees = [];
-  }
-  window.worldOctrees.push(worldOctree);
+  // 添加简单的线框辅助器
+  const boxHelper = new THREE.BoxHelper(box, 0x00ff00);
+  scene.add(boxHelper);
   
-  // 保存八叉树辅助线引用，用于控制可见性
-  if (window.helpersVisible && window.helpersVisible.octreeHelpers) {
-    window.helpersVisible.octreeHelpers.push(octreeHelper);
+  // 保存网格引用，用于BVH检测
+  if (!window.worldBVHMeshes) {
+    window.worldBVHMeshes = [];
   }
+  window.worldBVHMeshes.push(box);
   
   return box;
 }
@@ -282,35 +303,47 @@ function createRamp(position: THREE.Vector3, size: THREE.Vector3, angle: number,
   // 添加到场景
   scene.add(ramp);
   
-  // 创建8叉树用于碰撞检测
-  const worldOctree = new Octree();
-  worldOctree.fromGraphNode(ramp);
-  const octreeHelper = new OctreeHelper(worldOctree);
-  scene.add(octreeHelper);
+  // 创建BVH - 注意：这里直接在原始几何体上创建BVH
+  // 对于旋转的几何体，BVH会在世界空间中计算
+  rampGeometry.boundsTree = new MeshBVH(rampGeometry);
   
-  // 保存八叉树引用，用于后续碰撞检测
-  if (!window.worldOctrees) {
-    window.worldOctrees = [];
-  }
-  window.worldOctrees.push(worldOctree);
+  // 添加简单的线框辅助器
+  const boxHelper = new THREE.BoxHelper(ramp, 0x00ff00);
+  scene.add(boxHelper);
   
-  // 保存八叉树辅助线引用，用于控制可见性
-  if (window.helpersVisible && window.helpersVisible.octreeHelpers) {
-    window.helpersVisible.octreeHelpers.push(octreeHelper);
+  // 添加调试信息，帮助检查碰撞
+  console.log("创建斜坡:", {
+    位置: position.clone(),
+    尺寸: size.clone(),
+    角度: angle,
+    旋转弧度: angle * Math.PI / 180,
+    是否有BVH: !!rampGeometry.boundsTree
+  });
+  
+  // 保存网格引用，用于BVH检测
+  if (!window.worldBVHMeshes) {
+    window.worldBVHMeshes = [];
   }
+  window.worldBVHMeshes.push(ramp);
   
   return ramp;
 }
 
 function animate() {
   requestAnimationFrame(animate);
+
   // 使用mmdModel更新模型
   mmdModel.update(1/120, cameraControls, lookCamera);
   
-  // 更新辅助线和胶囊体
-  if (window.updateModelHelpers) {
-    window.updateModelHelpers();
+  // 确保模型移动后立即更新胶囊体位置
+  if (window.playerCapsule && mmdModel && mmdModel.mesh) {
+    mmdModel.updateCapsulePosition();
   }
+    
+    // 更新辅助线和胶囊体
+    if (window.updateModelHelpers) {
+      window.updateModelHelpers();
+    }
 
   window.cameraHelpers?.lookCameraHelper?.update()
   lookCamera.updateProjectionMatrix();
@@ -348,11 +381,11 @@ window.addEventListener('resize', function () {
 
 function handleKeyDown(event: KeyboardEvent) {
   mmdModel.handleKeyDown(event, keyMap);
-}
+      }
 
 function handleKeyUp(event: KeyboardEvent) {
   mmdModel.handleKeyUp(event, keyMap);
-}
+      }
 
 const keyMap = {
   'w': 'ArrowUp',

@@ -67,9 +67,7 @@ export class GLTFModel extends Model {
       // 设置动画
       this.setupAnimations();
       
-      // 创建胶囊体碰撞检测
-      const boundingBox = new THREE.Box3().setFromObject(this.mesh);
-      const { playerCapsule, capsuleVisual } = this.createCapsule(boundingBox);
+      const { playerCapsule, capsuleVisual } = this.createCapsule();
       
       // 设置全局引用
       window.playerCapsule = playerCapsule;
@@ -87,25 +85,6 @@ export class GLTFModel extends Model {
     }
   }
   
-  // 加载GLTF模型的Promise方法
-  private loadGLTFModel(modelPath: string): Promise<GLTF> {
-    return new Promise((resolve, reject) => {
-      const loader = new GLTFLoader();
-      
-      loader.load(
-        modelPath,
-        (gltf) => {
-          resolve(gltf);
-        },
-        (xhr) => {
-          console.log((xhr.loaded / xhr.total * 100) + '% loaded');
-        },
-        (error) => {
-          reject(error);
-        }
-      );
-    });
-  }
   
   // 设置动画
   private setupAnimations(): void {
@@ -133,44 +112,7 @@ export class GLTFModel extends Model {
     }
   }
   
-  // 创建胶囊体碰撞检测
-  createCapsule(boundingBox: THREE.Box3): { playerCapsule: Capsule, capsuleVisual: THREE.Mesh } {
-    const size = new THREE.Vector3();
-    boundingBox.getSize(size);
-    console.log(size);
-    // 计算胶囊体参数
-    const radius = Math.max(size.x, size.z) / 2 * 0.5;
-    const height = size.y * 0.9;
-    
-    // 创建物理胶囊体
-    const start = new THREE.Vector3(0, radius * 0.8, 0);
-    const end = new THREE.Vector3(0, height * 0.9 + radius, 0);
-    const playerCapsule = new Capsule(start, end, radius);
-    
-    // 创建胶囊体可视化
-    const capsuleGeometry = new THREE.CapsuleGeometry(radius, height, 8, 8);
-    const capsuleMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ff00,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.5
-    });
-    const capsuleVisual = new THREE.Mesh(capsuleGeometry, capsuleMaterial);
-    capsuleVisual.position.y = height / 2 + radius;
-    
-    // 保存胶囊体参数
-    this.playerCapsule = playerCapsule;
-    this.capsuleParams = {
-      visual: capsuleVisual,
-      radius,
-      height
-    };
-    
-    // 保存全局引用
-    window.capsuleParams = this.capsuleParams;
-    
-    return { playerCapsule, capsuleVisual };
-  }
+
   
   // 设置辅助视觉效果
   setupHelpers(scene: THREE.Scene, capsuleVisual: THREE.Mesh): void {
@@ -200,9 +142,12 @@ export class GLTFModel extends Model {
         
         // 更新胶囊体位置
         if (capsuleVisual && this.mesh) {
-          capsuleVisual.position.x = this.mesh.position.x;
-          capsuleVisual.position.z = this.mesh.position.z;
-          capsuleVisual.rotation.y = this.mesh.rotation.y;
+          const cylinderHeight = Math.max(0, this.capsuleParams?.height ?? 0 );
+          capsuleVisual.position.set(
+            this.mesh.position.x,
+            this.mesh.position.y + cylinderHeight / 2, // 上移radius距离，防止底部穿入地面
+            this.mesh.position.z
+          );
         }
       }
       
@@ -246,50 +191,6 @@ export class GLTFModel extends Model {
       this.standAction.play();
     }
   }
-  
-  // 更新模型
-  // update(delta: number, cameraControls: OrbitControls, lookCamera: THREE.PerspectiveCamera): void {
-  //   // 更新动画混合器
-  //   if (this.mixer) {
-  //     this.mixer.update(delta);
-  //   }
-    
-  //   // 处理键盘输入
-  //   const speed = 1000.0 * delta;
-    
-  //   // 根据按键状态移动模型
-  //   if (this.keys.ArrowUp) {
-  //     this.move('forward', speed, delta);
-  //   }
-  //   if (this.keys.ArrowDown) {
-  //     this.move('backward', speed, delta);
-  //   }
-  //   if (this.keys.ArrowLeft) {
-  //     this.move('left', speed, delta);
-  //   }
-  //   if (this.keys.ArrowRight) {
-  //     this.move('right', speed, delta);
-  //   }
-    
-  //   // 处理碰撞检测
-  //   this.handleCollision();
-    
-  //   // 更新相机位置
-  //   if (lookCamera && this.mesh) {
-  //     const azimuthAngle = cameraControls.getAzimuthalAngle();
-      
-  //     lookCamera.position.x = this.mesh.position.x - 2 * Math.sin(azimuthAngle);
-  //     lookCamera.position.y = this.mesh.position.y + 0.75 * this.modelSize?.height;
-  //     lookCamera.position.z = this.mesh.position.z - 2 * Math.cos(azimuthAngle);
-      
-  //     cameraControls.target.set(
-  //       this.mesh.position.x - 3 * Math.sin(azimuthAngle),
-  //       this.mesh.position.y + 0.75 * this.modelSize?.height,
-  //       this.mesh.position.z - 3 * Math.cos(azimuthAngle)
-  //     );
-  //   }
-  // }
-  
   // 重置位置
   resetPosition(): void {
     super.resetPosition();

@@ -61,12 +61,13 @@ export class MMDModel extends Model {
       this.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
       this.mesh.position.set(0,0,0)
       this.getModelDimensions()
-      // 计算模型的包围盒
-      const boundingBox = new THREE.Box3().setFromObject(this.mesh);
       
       // 创建胶囊体
-      const { capsuleVisual } = this.createCapsule(boundingBox);
-      
+      const { playerCapsule,capsuleVisual } = this.createCapsule();
+
+      // 设置全局引用
+      window.playerCapsule = playerCapsule;
+
       // 添加辅助视觉效果
       this.setupHelpers(scene, capsuleVisual);
       
@@ -95,56 +96,6 @@ export class MMDModel extends Model {
       console.error('加载模型或动画时出错:', error);
     }
   }
-  
-  // 创建胶囊体 - 实现基类抽象方法
-  createCapsule(boundingBox: THREE.Box3): { playerCapsule: Capsule, capsuleVisual: THREE.Mesh } {
-    // 计算模型尺寸
-    const modelHeight = boundingBox.max.y - boundingBox.min.y;
-    const modelWidth = Math.max(
-      boundingBox.max.x - boundingBox.min.x,
-      boundingBox.max.z - boundingBox.min.z
-    );
-      
-    // 根据模型尺寸设置胶囊体参数
-    const radius = modelWidth * 0.25; // 胶囊体半径缩小为模型宽度的25%
-    const height = modelHeight * 0.6; // 胶囊体高度缩小为模型高度的60%
-    
-    // 创建起点和终点，用于定义胶囊体的轴线
-    const start = new THREE.Vector3(0, radius * 0.8, 0); // 降低胶囊体底部中心点
-    const end = new THREE.Vector3(0, height * 0.9 + radius, 0); // 调整胶囊体顶部中心点
-    const playerCapsule = new Capsule(start, end, radius);
-    
-    // 创建可视化的胶囊体网格（用于显示）
-    const capsuleGeometry = new THREE.CapsuleGeometry(radius, height, 8, 16);
-    const capsuleMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ff00,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.5
-    });
-    const capsuleVisual = new THREE.Mesh(capsuleGeometry, capsuleMaterial);
-    
-    // 调整胶囊体位置，使其最低端与平面相切并更好地贴合模型
-    capsuleVisual.position.y = radius * 0.8 + height * 0.9 / 2;
-    
-    // 将可视化胶囊体添加为模型的子对象
-    this.mesh.add(capsuleVisual);
-    
-    // 保存胶囊体参数
-    this.playerCapsule = playerCapsule;
-    this.capsuleParams = {
-      visual: capsuleVisual,
-      radius,
-      height
-    };
-    
-    // 设置全局变量以保持兼容性
-    window.playerCapsule = this.playerCapsule;
-    window.capsuleParams = this.capsuleParams;
-    
-    return { playerCapsule, capsuleVisual };
-  }
-  
   // 设置辅助视觉效果 - 实现基类抽象方法
   setupHelpers(scene: THREE.Scene, capsuleVisual: THREE.Mesh): void {
     // 添加骨骼辅助线
@@ -156,6 +107,8 @@ export class MMDModel extends Model {
     const boxHelper = new THREE.BoxHelper(this.mesh, 0xffff00);
     scene.add(boxHelper);
       
+    scene.add(capsuleVisual);
+
     // 初始化辅助线可见性对象
     window.helpersVisible = {
       skeletonHelper: skeletonHelper,
@@ -165,59 +118,28 @@ export class MMDModel extends Model {
     };
     
     // 设置更新函数
-    const updateHelpers = () => {
-      boxHelper.update();
-      // 骨骼辅助线会自动更新
+    window.updateModelHelpers = () => {
+      if (window.helpersVisible) {
+        const { boxHelper, capsuleVisual } = window.helpersVisible;
         
-      // 更新物理胶囊体和可视化胶囊体
-      this.updateCapsulePosition();
-      
-      // 处理碰撞检测
-      this.handleCollision();
-    };
-      
-    // 将更新函数添加到全局变量，以便在animate中调用
-    window.updateModelHelpers = updateHelpers;
-  }
-  
-  // 重写基类的updateCapsulePosition方法，添加骨骼动画相关的胶囊体更新
-  updateCapsulePosition(): void {
-    if (!this.playerCapsule || !this.capsuleParams) return;
-    
-    // 先调用基类方法进行基本更新
-    super.updateCapsulePosition();
-    
-    // 获取模型当前位置
-    const modelPosition = this.mesh.position.clone();
-    const { radius, height, visual } = this.capsuleParams;
-    
-    // 如果需要，可以根据骨骼动画更新胶囊体的尺寸
-    if (this.mesh.skeleton && this.mesh.skeleton.bones.length > 0) {
-      // 计算骨骼的边界
-      let minY = Infinity;
-      let maxY = -Infinity;
-      
-      this.mesh.skeleton.bones.forEach(bone => {
-        const bonePosition = new THREE.Vector3();
-        bone.getWorldPosition(bonePosition);
-        minY = Math.min(minY, bonePosition.y);
-        maxY = Math.max(maxY, bonePosition.y);
-      });
-      
-      // 如果有有效的骨骼高度，更新胶囊体
-      if (minY !== Infinity && maxY !== -Infinity) {
-        const newHeight = maxY - minY;
-        
-        // 更新物理胶囊体，使用调整后的高度
-        const adjustedHeight = newHeight * 0.9; // 使用90%的骨骼高度
-        this.playerCapsule.start.y = modelPosition.y + radius * 0.8;
-        this.playerCapsule.end.y = modelPosition.y + adjustedHeight + radius;
-        
-        // 更新可视化胶囊体
-        visual.position.y = radius * 0.8 + adjustedHeight/2;
-        visual.scale.y = adjustedHeight / height;
+        // 更新包围盒辅助线
+        if (boxHelper) {
+          boxHelper.update();
+        }
+        // 更新胶囊体位置
+        if (capsuleVisual && this.mesh) {
+          const cylinderHeight = Math.max(0, this.capsuleParams?.height ?? 0 );
+          capsuleVisual.position.set(
+            this.mesh.position.x,
+            this.mesh.position.y + cylinderHeight / 2, // 上移radius距离，防止底部穿入地面
+            this.mesh.position.z
+          );
+        }
       }
-    }
+      
+      // 更新胶囊体位置
+      this.updateCapsulePosition();
+    };
   }
   
   // 碰撞检测
