@@ -54,19 +54,22 @@ export class MMDModel extends Model {
       const helper = new MMDAnimationHelper();
       helper.add(mmd, { physics: true });
       this.mesh = mmd;
-      const meshSize = this.getModelDimensions()
+      const meshSize = this.setModelDimensions()
       const minWidth = 10;  // 网格基本单位
       const scaleXZ = Math.max(minWidth / meshSize.width, minWidth / meshSize.depth);
       const scaleFactor = Math.max(1, scaleXZ); // 至少保持原大小
       this.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
       this.mesh.position.set(0,0,0)
-      this.getModelDimensions()
+      this.setModelDimensions()
       
       // 创建胶囊体
       const { playerCapsule,capsuleVisual } = this.createCapsule();
 
       // 设置全局引用
       window.playerCapsule = playerCapsule;
+      
+      // 创建物理身体
+      this.createPhysicsBody();
 
       // 添加辅助视觉效果
       this.setupHelpers(scene, capsuleVisual);
@@ -91,7 +94,7 @@ export class MMDModel extends Model {
       
       // 添加到场景
       scene.add(this.mesh);
-      this.getModelDimensions()
+      this.setModelDimensions()
     } catch (error) {
       console.error('加载模型或动画时出错:', error);
     }
@@ -113,8 +116,7 @@ export class MMDModel extends Model {
     window.helpersVisible = {
       skeletonHelper: skeletonHelper,
       boxHelper: boxHelper,
-      capsuleVisual: capsuleVisual,
-      octreeHelpers: []
+      capsuleVisual: capsuleVisual
     };
     
     // 设置更新函数
@@ -140,53 +142,6 @@ export class MMDModel extends Model {
       // 更新胶囊体位置
       this.updateCapsulePosition();
     };
-  }
-  
-  // 碰撞检测
-  handleCollision(): void {
-    if (!window.worldOctrees || !window.worldOctrees.length || !this.playerCapsule) return;
-    
-    // 遍历所有八叉树进行碰撞检测
-    for (const octree of window.worldOctrees) {
-      // 检查胶囊体是否与八叉树中的物体相交
-      const result = octree.capsuleIntersect(this.playerCapsule);
-      
-      // 如果发生碰撞，处理碰撞响应
-      if (result) {
-        // 计算碰撞法线的垂直分量
-        const verticalComponent = Math.abs(result.normal.y);
-        
-        // 如果法线有较大的垂直分量，说明是斜坡
-        if (verticalComponent > 0.1) {
-          // 对于斜坡，我们需要沿着斜面移动
-          // 计算沿斜面的移动分量
-          const slideDirection = new THREE.Vector3()
-            .copy(result.normal)
-            .multiplyScalar(result.depth);
-            
-          // 将垂直分量稍微放大，以便能够"爬"上斜坡
-          slideDirection.y *= 1.2;
-          
-          // 应用移动
-          this.mesh.position.add(slideDirection);
-          
-          // 更新胶囊体位置
-          this.playerCapsule.start.add(slideDirection);
-          this.playerCapsule.end.add(slideDirection);
-        } else {
-          // 对于普通碰撞，直接推离碰撞点
-          const pushVector = new THREE.Vector3()
-            .copy(result.normal)
-            .multiplyScalar(result.depth);
-          
-          this.mesh.position.add(pushVector);
-          
-          // 更新胶囊体位置
-          this.playerCapsule.start.add(pushVector);
-          this.playerCapsule.end.add(pushVector);
-        }
-      }
-    }
   }
   
   // 更新动画
@@ -227,26 +182,24 @@ export class MMDModel extends Model {
   }
 
   // 获取模型三维尺寸
-  getModelDimensions(): { width: number; height: number; depth: number } {
-    console.log(this.mesh);
-    if (!this.mesh || !(this.mesh instanceof THREE.Mesh)) {
+  setModelDimensions(): { width: number; height: number; depth: number } {
+    if (!this.mesh) {
       return { width: 0, height: 0, depth: 0 };
     }
 
-    const geometry = this.mesh.geometry;
-    geometry.computeBoundingBox();
-    const box = geometry.boundingBox!;
+    // 使用Box3.setFromObject计算整个模型的边界盒（包括所有子网格）
+    const boundingBox = new THREE.Box3().setFromObject(this.mesh);
+    const size = new THREE.Vector3();
+    boundingBox.getSize(size);
+
+    // 存储尺寸
     this.modelSize = {
-      width: box.max.x - box.min.x,
-      height: box.max.y - box.min.y,
-      depth: box.max.z - box.min.z,
-    }
-    console.log('modelSize:', this.modelSize);
-    return {
-      width: box.max.x - box.min.x,
-      height: box.max.y - box.min.y,
-      depth: box.max.z - box.min.z,
+      width: size.x,
+      height: size.y,
+      depth: size.z
     };
+    
+    return this.modelSize;
   }
 }
 
@@ -260,12 +213,13 @@ declare global {
       radius: number;
       height: number;
     };
-    worldOctrees?: any[];
     helpersVisible?: {
       skeletonHelper?: THREE.SkeletonHelper;
       boxHelper?: THREE.BoxHelper;
       capsuleVisual?: THREE.Mesh;
-      octreeHelpers?: THREE.Object3D[];
+    };
+    cameraHelpers?: {
+      lookCameraHelper?: THREE.CameraHelper;
     };
   }
 } 

@@ -50,13 +50,13 @@ export class GLTFModel extends Model {
       const gltf = await loadModel();
       // 设置模型
       this.mesh = gltf.scene;
-      const meshSize = this.getModelDimensions()
+      const meshSize = this.setModelDimensions()
       const minWidth = 10;  // 网格基本单位
       const scaleXZ = Math.max(minWidth / meshSize.width, minWidth / meshSize.depth);
       const scaleFactor = Math.max(1, scaleXZ); // 至少保持原大小
       this.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
       this.mesh.position.set(0,0,0)
-      this.getModelDimensions()
+      this.setModelDimensions()
       
       // 创建混合器
       this.mixer = new THREE.AnimationMixer(this.mesh);
@@ -71,6 +71,9 @@ export class GLTFModel extends Model {
       
       // 设置全局引用
       window.playerCapsule = playerCapsule;
+      
+      // 创建物理身体
+      this.createPhysicsBody();
       
       // 设置辅助视觉效果
       this.setupHelpers(scene, capsuleVisual);
@@ -126,8 +129,7 @@ export class GLTFModel extends Model {
     // 保存引用以便控制可见性
     window.helpersVisible = {
       boxHelper,
-      capsuleVisual,
-      octreeHelpers: []
+      capsuleVisual
     };
     
     // 创建更新辅助线的函数
@@ -199,7 +201,7 @@ export class GLTFModel extends Model {
     this.stopWalk();
   }
   // 获取模型三维尺寸
-  getModelDimensions(): { width: number; height: number; depth: number } {
+  setModelDimensions(): { width: number; height: number; depth: number } {
     if (!this.mesh) return { width: 0, height: 0, depth: 0 };
 
     // GLTF模型需要从整个场景计算包围盒

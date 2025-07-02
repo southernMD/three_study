@@ -7,45 +7,13 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
-import { MMDLoader } from "three/examples/jsm/loaders/MMDLoader.js";
-import { MMDAnimationHelper } from "three/examples/jsm/animation/MMDAnimationHelper.js";
-import { AnimationMixer } from 'three/src/animation/AnimationMixer.js';
-import { AnimationClip } from 'three/src/animation/AnimationClip.js';
-import type { KeyframeTrack } from 'three';
-import { AnimationAction } from 'three/src/animation/AnimationAction.js';
 import { GridHelper } from 'three/src/helpers/GridHelper.js';
-import { Octree } from 'three/examples/jsm/math/Octree.js';
-import { OctreeHelper } from 'three/examples/jsm/Addons.js';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 // 导入MMDModel类
 import { MMDModel } from '../models/MMDModel';
 import { GLTFModel } from '../models/GLTFModel';
-import { StaticGeometryGenerator, MeshBVH, MeshBVHHelper } from 'three-mesh-bvh';
-
-// 添加全局声明
-declare global {
-  interface Window {
-    updateModelHelpers?: () => void;
-    playerCapsule?: Capsule;
-    capsuleParams?: {
-      visual: THREE.Mesh;
-      radius: number;
-      height: number;
-    };
-    worldOctrees?: Octree[];
-    helpersVisible?: {
-      skeletonHelper?: THREE.SkeletonHelper;
-      boxHelper?: THREE.BoxHelper;
-      capsuleVisual?: THREE.Mesh;
-      octreeHelpers?: THREE.Object3D[];
-      bvhHelpers?: THREE.Object3D[];
-    };
-    cameraHelpers?: {
-      lookCameraHelper?: THREE.CameraHelper;
-    };
-    worldBVHMeshes?: THREE.Mesh[];
-  }
-}
+// 导入cannon-es物理引擎
+import * as CANNON from 'cannon-es';
 
 const scene = new THREE.Scene()
 const dom = ref()
@@ -96,8 +64,31 @@ const guiFn = {
   createBoxHere: () => {
     if (mmdModel && mmdModel.mesh) {
       const position = mmdModel.mesh.position.clone();
-      position.y += 5; // 在模型头上方创建盒子
+      position.y += 55; // 在模型头上方创建盒子
       createBox(0x00ff00, position);
+    }
+  },
+  // 创建一组掉落的盒子
+  createFallingBoxesNow: () => {
+    createFallingBoxes();
+  },
+  // 显示物理世界信息
+  showPhysicsInfo: () => {
+    if (window.physicsWorld) {
+      console.log('物理世界信息：', window.physicsWorld);
+      console.log('物理对象数量:', window.physicsWorld.bodies.length);
+      
+      // 显示所有物理对象的位置
+      window.physicsWorld.bodies.forEach((body: CANNON.Body, index: number) => {
+        console.log(`物理对象 ${index}:`, {
+          位置: body.position,
+          质量: body.mass,
+          类型: body.type === CANNON.Body.STATIC ? '静态' : '动态',
+          形状数量: body.shapes.length
+        });
+      });
+    } else {
+      console.log('物理世界未初始化！');
     }
   }
 }
@@ -108,31 +99,15 @@ gui.add(guiFn, 'toggleHelpers').name('显示/隐藏人物辅助线')
 gui.add(guiFn, 'forceWalk').name('播放走路动画')
 gui.add(guiFn, 'forceStand').name('播放站立动画')
 gui.add(guiFn, 'createBoxHere').name('在当前位置创建箱子')
-
-// 添加一个显示BVH信息的按钮
-gui.add({
-  showBVHInfo: () => {
-    if (window.worldBVHMeshes && window.worldBVHMeshes.length > 0) {
-      const mesh = window.worldBVHMeshes[0];
-      console.log('BVH信息：', mesh.geometry.boundsTree);
-      console.log('是否有boundsTree:', !!mesh.geometry.boundsTree);
-      // 创建一个BoxHelper来显示BVH根节点的边界框
-      if (mesh.geometry.boundsTree) {
-        const box = new THREE.Box3();
-        mesh.geometry.boundsTree.getBoundingBox(box);
-        const boxHelper = new THREE.Box3Helper(box, 0xff0000);
-        scene.add(boxHelper);
-      }
-    } else {
-      console.log('没有找到带BVH的网格！');
-    }
-  }
-}, 'showBVHInfo').name('显示BVH信息');
+gui.add(guiFn, 'createFallingBoxesNow').name('创建掉落的盒子')
+gui.add(guiFn, 'showPhysicsInfo').name('显示物理信息')
 
 const gridHelper = new GridHelper(1000, 100, 0x444444, 0x444444);
 scene.add(gridHelper);
 
 onMounted(() => {
+  // 初始化物理世界
+  initPhysicsWorld();
 
   Ammo().then(async function (AmmoLib: any) {
     Ammo = AmmoLib;
@@ -142,17 +117,21 @@ onMounted(() => {
     createAxesHelper()
 
     await loadModel()
+    
+    // 创建静态盒子（边界）
     createBox(0xff0000, new THREE.Vector3(0, 5, -105))
     createBox(0xffff00, new THREE.Vector3(0, 5, 105))
     createBox(0x66ccff, new THREE.Vector3(105, 5, 0))
     createBox(0xff00fff, new THREE.Vector3(-105, 5, 0))
-    createBox(0x66ccff, new THREE.Vector3(50, 70, 50))
-    // createBox(0xff00fff, new THREE.Vector3(0, 55, 0))
+    
+    // 创建可以掉落的盒子
+    // createFallingBoxes();
     
     // 创建不同角度的斜坡用于测试
-    // createRamp(new THREE.Vector3(20, 0, -20), new THREE.Vector3(15, 2, 30), 15, 0x8B4513); // 15度斜坡
-    // createRamp(new THREE.Vector3(-20, 0, -20), new THREE.Vector3(15, 2, 30), 25, 0xA0522D); // 25度斜坡
     createRamp(new THREE.Vector3(0, 0, -60), new THREE.Vector3(80, 2, 55), 20, 0xD2691E); // 宽一点的20度斜坡
+    
+    // 创建物理地面
+    createGround();
     
     lookCamera = mmdModel.createLookCamera(scene)
     hadRenderCamera = camera
@@ -201,33 +180,6 @@ onUnmounted(() => {
 // 创建模型实例
 let mmdModel: MMDModel | GLTFModel;
 
-// 修改CreateLookCamera使用mmdModel
-// function CreateLookCamera() {
-//   const myCameraLook = new THREE.PerspectiveCamera(45, 1, 1, 200);
-//   myPerCamLookHelper = new THREE.CameraHelper(myCameraLook);
-//   // 确保mmdMesh已经初始化
-//   if (mmdModel && mmdModel.mesh) {
-//     myCameraLook.position.set(
-//       mmdModel.mesh.position.x, 
-//       mmdModel.mesh.position.y + 13, 
-//       mmdModel.mesh.position.z + 2
-//     );
-//   } else {
-//     myCameraLook.position.set(0, 13, 2);
-//   }
-//   scene.add(myPerCamLookHelper);
-//   return myCameraLook;
-// }
-
-function updateLookCamera(x: number, y: number, z: number) {
-  lookCamera.position.set(x, y, z);
-}
-
-function updateLookAt(x: number, y: number, z: number) {
-  lookCamera.lookAt(x, y, z);
-}
-
-
 function CreateCamera() {
   //创建一个透视投影对象
   const camera = new THREE.PerspectiveCamera(50, width / height, 1, 8000)
@@ -259,31 +211,88 @@ function createAxesHelper() {
 }
 
 async function loadModel() {
-  mmdModel = new GLTFModel();
-  await mmdModel.load(scene, '/model/newtest.glb');
-  // mmdModel = new MMDModel();
-  // await mmdModel.load(scene, '/lm/楈柌v2.pmx', '/lm/走路.vmd', '/lm/站立.vmd');
+  // mmdModel = new GLTFModel();
+  // await mmdModel.load(scene, '/model/newtest.glb');
+  mmdModel = new MMDModel();
+  await mmdModel.load(scene, '/lm/楈柌v2.pmx', '/lm/走路.vmd', '/lm/站立.vmd');
+}
+
+// 添加全局声明
+declare global {
+  interface Window {
+    updateModelHelpers?: () => void;
+    playerCapsule?: Capsule;
+    capsuleParams?: {
+      visual: THREE.Mesh;
+      radius: number;
+      height: number;
+    };
+    helpersVisible?: {
+      skeletonHelper?: THREE.SkeletonHelper;
+      boxHelper?: THREE.BoxHelper;
+      capsuleVisual?: THREE.Mesh;
+    };
+    cameraHelpers?: {
+      lookCameraHelper?: THREE.CameraHelper;
+    };
+    // Cannon.js 物理世界
+    physicsWorld?: CANNON.World;
+    // 物理对象与Three.js对象的映射
+    physicsBodies?: Map<CANNON.Body, THREE.Object3D>;
+    // 角色物理身体
+    playerBody?: CANNON.Body;
+  }
 }
 
 function createBox(color: THREE.ColorRepresentation, position: THREE.Vector3) {
-  const boxGeometry = new THREE.BoxGeometry(10, 100, 10);
+  // 创建Three.js几何体
+  const boxSize = { width: 10, height: 10, depth: 10 };
+  const boxGeometry = new THREE.BoxGeometry(boxSize.width, boxSize.height, boxSize.depth);
   const boxMaterial = new THREE.MeshStandardMaterial({ color });
   const box = new THREE.Mesh(boxGeometry, boxMaterial);
   box.position.set(position.x, position.y, position.z);
+  box.castShadow = true;
+  box.receiveShadow = true;
   scene.add(box);
   
-  // 为几何体创建BVH
-  boxGeometry.boundsTree = new MeshBVH(boxGeometry);
-  
   // 添加简单的线框辅助器
-  const boxHelper = new THREE.BoxHelper(box, 0x00ff00);
-  scene.add(boxHelper);
+  // const boxHelper = new THREE.BoxHelper(box, 0x00ff00);
+  // scene.add(boxHelper);
   
-  // 保存网格引用，用于BVH检测
-  if (!window.worldBVHMeshes) {
-    window.worldBVHMeshes = [];
+  // 如果物理世界已初始化，创建物理对象
+  if (window.physicsWorld) {
+    // 创建Cannon.js物理体
+    const boxShape = new CANNON.Box(new CANNON.Vec3(boxSize.width/2, boxSize.height/2, boxSize.depth/2));
+    
+    // 创建物理身体 - 设置质量为非零值，使其受重力影响
+    const boxBody = new CANNON.Body({
+      mass: 5, // 设置质量为5，使其受重力影响
+      position: new CANNON.Vec3(position.x, position.y, position.z),
+      material: new CANNON.Material({
+        friction: 0.3,
+        restitution: 0.3 // 弹性
+      })
+    });
+    
+    // 添加形状到物理身体
+    boxBody.addShape(boxShape);
+    
+    // 为物体添加碰撞事件监听
+    // boxBody.addEventListener('collide', (event) => {
+    //   console.log('箱子碰撞事件', event);
+    // });
+    
+    // 添加到物理世界
+    window.physicsWorld.addBody(boxBody);
+    
+    // 关联物理体和可视化对象
+    if (!window.physicsBodies) {
+      window.physicsBodies = new Map();
+    }
+    window.physicsBodies.set(boxBody, box);
+    
+    console.log(`创建箱子物理对象: 位置(${position.x}, ${position.y}, ${position.z}), 质量: 5kg`);
   }
-  window.worldBVHMeshes.push(box);
   
   return box;
 }
@@ -298,39 +307,103 @@ function createRamp(position: THREE.Vector3, size: THREE.Vector3, angle: number,
   ramp.position.copy(position);
   
   // 旋转斜坡
-  ramp.rotation.x = angle * Math.PI / 180;
+  const angleRad = angle * Math.PI / 180;
+  ramp.rotation.x = angleRad;
   
   // 添加到场景
   scene.add(ramp);
   
-  // 创建BVH - 注意：这里直接在原始几何体上创建BVH
-  // 对于旋转的几何体，BVH会在世界空间中计算
-  rampGeometry.boundsTree = new MeshBVH(rampGeometry);
-  
   // 添加简单的线框辅助器
-  const boxHelper = new THREE.BoxHelper(ramp, 0x00ff00);
-  scene.add(boxHelper);
+  // const boxHelper = new THREE.BoxHelper(ramp, 0x00ff00);
+  // scene.add(boxHelper);
   
-  // 添加调试信息，帮助检查碰撞
+  // 添加调试信息
   console.log("创建斜坡:", {
     位置: position.clone(),
     尺寸: size.clone(),
     角度: angle,
-    旋转弧度: angle * Math.PI / 180,
-    是否有BVH: !!rampGeometry.boundsTree
+    旋转弧度: angleRad
   });
   
-  // 保存网格引用，用于BVH检测
-  if (!window.worldBVHMeshes) {
-    window.worldBVHMeshes = [];
+  // 如果物理世界已初始化，创建物理对象
+  if (window.physicsWorld) {
+    // 创建Cannon.js物理体
+    const rampShape = new CANNON.Box(new CANNON.Vec3(size.x/2, size.y/2, size.z/2));
+    
+    // 创建物理身体
+    const rampBody = new CANNON.Body({
+      mass: 0, // 质量为0表示静态物体
+      position: new CANNON.Vec3(position.x, position.y, position.z),
+      material: new CANNON.Material({
+        friction: 0.3, // 摩擦系数
+        restitution: 0.2 // 弹性系数
+      })
+    });
+    
+    // 添加形状并旋转
+    rampBody.addShape(rampShape);
+    rampBody.quaternion.setFromAxisAngle(new CANNON.Vec3(1, 0, 0), angleRad);
+    
+    // 为斜坡添加碰撞事件监听
+    // rampBody.addEventListener('collide', (event) => {
+    //   console.log('斜坡碰撞事件', event);
+    // });
+    
+    // 添加到物理世界
+    window.physicsWorld.addBody(rampBody);
+    
+    // 关联物理体和可视化对象
+    if (!window.physicsBodies) {
+      window.physicsBodies = new Map();
+    }
+    window.physicsBodies.set(rampBody, ramp);
+    
+    console.log(`创建斜坡物理对象: 位置(${position.x}, ${position.y}, ${position.z}), 角度${angle}度`);
   }
-  window.worldBVHMeshes.push(ramp);
   
   return ramp;
 }
 
 function animate() {
   requestAnimationFrame(animate);
+
+  // 更新物理世界
+  if (window.physicsWorld) {
+    const timeStep = 1/60;
+    window.physicsWorld.step(timeStep);
+    
+    // 同步物理对象和可视化对象
+    if (window.physicsBodies) {
+      for (const [body, mesh] of window.physicsBodies.entries()) {
+        mesh.position.copy(new THREE.Vector3(body.position.x, body.position.y, body.position.z));
+        mesh.quaternion.copy(new THREE.Quaternion(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w));
+      }
+    }
+    
+    // 如果存在玩家物理身体，同步到模型
+    if (window.playerBody && mmdModel && mmdModel.mesh) {
+      // 获取模型尺寸，用于计算正确的位置偏移
+      const dimensions = mmdModel.getModelDimensions();
+      const height = dimensions.height;
+      
+      // 计算模型底部位置 = 胶囊体中心位置 - 高度/2
+      mmdModel.mesh.position.y = window.playerBody.position.y - height / 2;
+      
+      // 如果物理身体有水平速度，也同步X和Z位置
+      if (Math.abs(window.playerBody.velocity.x) > 0.01 || Math.abs(window.playerBody.velocity.z) > 0.01) {
+        mmdModel.mesh.position.x = window.playerBody.position.x;
+        mmdModel.mesh.position.z = window.playerBody.position.z;
+      }
+      
+      // 如果物理身体有旋转，可以考虑同步旋转（通常不需要，因为我们设置了fixedRotation）
+      // mmdModel.mesh.quaternion.copy(new THREE.Quaternion(
+      //   window.playerBody.quaternion.x,
+      //   window.playerBody.quaternion.y,
+      //   window.playerBody.quaternion.z,
+      //   window.playerBody.quaternion.w
+      // ));
+    }
+  }
 
   // 使用mmdModel更新模型
   mmdModel.update(1/120, cameraControls, lookCamera);
@@ -340,10 +413,10 @@ function animate() {
     mmdModel.updateCapsulePosition();
   }
     
-    // 更新辅助线和胶囊体
-    if (window.updateModelHelpers) {
-      window.updateModelHelpers();
-    }
+  // 更新辅助线和胶囊体
+  if (window.updateModelHelpers) {
+    window.updateModelHelpers();
+  }
 
   window.cameraHelpers?.lookCameraHelper?.update()
   lookCamera.updateProjectionMatrix();
@@ -367,9 +440,6 @@ function light() {
   pointLight.position.set(50, 50, 50);
   scene.add(pointLight);
 }
-
-
-
 
 window.addEventListener('resize', function () {
   width = window.innerWidth
@@ -398,19 +468,108 @@ const keyMap = {
   'D': 'ArrowRight',
 }
 
-function createPoint(x: number, y: number, z: number) {
-  const geometry = new THREE.BufferGeometry();
-  const positions = new Float32Array([
-    x, y, z  // 单个点的位置
-  ]);
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const material = new THREE.PointsMaterial({
-    color: 0xff0000,  // 点的颜色
-    size: 1,        // 点的大小
-    sizeAttenuation: true  // 是否启用大小衰减
+// 初始化物理世界
+function initPhysicsWorld() {
+  console.log("初始化物理世界...");
+  
+  // 创建物理世界
+  const world = new CANNON.World();
+  
+  // 设置重力 - 使用更强的重力效果
+  world.gravity.set(0, -20, 0);
+  
+  // 设置物理世界参数
+  world.broadphase = new CANNON.NaiveBroadphase();
+  world.allowSleep = false; // 禁止物体休眠，确保所有物体都保持活跃
+  
+  // 创建默认接触材质
+  const defaultMaterial = new CANNON.Material('default');
+  const defaultContactMaterial = new CANNON.ContactMaterial(
+    defaultMaterial,
+    defaultMaterial,
+    {
+      friction: 0.5, // 增加摩擦力
+      restitution: 0.3, // 弹性系数
+      contactEquationStiffness: 1e8, // 增加接触刚度
+      contactEquationRelaxation: 3
+    }
+  );
+  
+  // 添加接触材质到世界
+  world.addContactMaterial(defaultContactMaterial);
+  world.defaultContactMaterial = defaultContactMaterial;
+  
+  // 保存到全局变量
+  window.physicsWorld = world;
+  window.physicsBodies = new Map();
+  
+  console.log("物理世界初始化完成，重力设置为", world.gravity);
+  return world;
+}
+
+// 创建地面
+function createGround() {
+  if (!window.physicsWorld) return;
+  
+  // 创建地面平面
+  const groundShape = new CANNON.Plane();
+  const groundBody = new CANNON.Body({
+    mass: 0, // 质量为0表示静态物体
+    material: new CANNON.Material({
+      friction: 0.5, // 增加摩擦力
+      restitution: 0.3 // 弹性系数
+    })
   });
-  const points = new THREE.Points(geometry, material);
-  scene.add(points);
+  
+  // 添加形状
+  groundBody.addShape(groundShape);
+  
+  // 旋转地面使其朝上
+  groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  groundBody.position.set(0, 0, 0);
+  
+  // 添加碰撞事件监听器
+  // groundBody.addEventListener('collide', (event) => {
+  //   console.log('地面碰撞事件', event);
+  // });
+  
+  // 添加到物理世界
+  window.physicsWorld.addBody(groundBody);
+  
+  // 创建地面可视化
+  const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
+  const groundMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0x666666,
+    transparent: true,
+    opacity: 0.8
+  });
+  const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+  groundMesh.rotation.x = -Math.PI / 2;
+  groundMesh.receiveShadow = true;
+  scene.add(groundMesh);
+  
+  // 关联物理体和可视化对象
+  if (!window.physicsBodies) {
+    window.physicsBodies = new Map();
+  }
+  window.physicsBodies.set(groundBody, groundMesh);
+  
+  console.log("地面创建完成");
+}
+
+// 创建多个掉落的盒子，用于测试物理效果
+function createFallingBoxes() {
+  // 创建不同高度的掉落盒子
+  for (let i = 0; i < 10; i++) {
+    const x = Math.random() * 40 - 20; // -20到20之间的随机值
+    const z = Math.random() * 40 - 20;
+    const y = 20 + i * 5; // 不同高度
+    const color = new THREE.Color(Math.random(), Math.random(), Math.random());
+    
+    createBox(color, new THREE.Vector3(x, y, z));
+  }
+  
+  console.log("创建了10个掉落的盒子");
 }
 </script>
 

@@ -2,6 +2,16 @@ import * as THREE from 'three';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { MeshBVH } from 'three-mesh-bvh';
+// 导入cannon-es物理引擎
+import * as CANNON from 'cannon-es';
+
+// 定义碰撞事件接口
+interface CollideEvent {
+  type: string;
+  body: CANNON.Body;
+  target: CANNON.Body;
+  contact: CANNON.ContactEquation;
+}
 
 // 基础模型类 - 包含通用功能如键盘事件、胶囊体碰撞、移动等
 export abstract class Model {
@@ -24,25 +34,14 @@ export abstract class Model {
   // 碰撞相关
   protected playerCapsule?: Capsule;
   protected capsuleParams?: {
-    visual: THREE.Mesh;
     radius: number;
     height: number;
+    visual: THREE.Mesh;
   };
-
-  // 旋转状态
-  leftRotate: number | undefined = undefined;
-  rightRotate: number | undefined = undefined;
 
   // 相机控制器相关
   private cameraControlsChangeHandler?: (event: any) => void;
   private controlsChangeTimeout?: number;
-
-  // 临时变量，用于碰撞检测计算
-  private tempVector = new THREE.Vector3();
-  private tempVector2 = new THREE.Vector3();
-  private tempBox = new THREE.Box3();
-  private tempMat = new THREE.Matrix4();
-  private tempSegment = new THREE.Line3();
 
   constructor() {
     this.keys = {
@@ -64,7 +63,7 @@ export abstract class Model {
 
   // 创建跟随相机 - 创建一个跟随模型的相机
   createLookCamera(scene: THREE.Scene): THREE.PerspectiveCamera {
-    const camera = new THREE.PerspectiveCamera(45, 1, 1, 200);
+    const camera = new THREE.PerspectiveCamera(45, 1, 10, 200);
     const cameraHelper = new THREE.CameraHelper(camera);
 
     // 设置相机位置
@@ -72,7 +71,7 @@ export abstract class Model {
       camera.position.set(
         this.mesh.position.x,
         this.mesh.position.y + 1 * this.modelSize?.height,
-        this.mesh.position.z + 2
+        this.mesh.position.z
       );
     } else {
       camera.position.set(0, 13, 2);
@@ -105,7 +104,7 @@ export abstract class Model {
       controls.target.set(
         this.mesh.position.x,
         this.mesh.position.y + 1 * this.modelSize?.height,
-        this.mesh.position.z + 3
+        this.mesh.position.z
       );
     }
 
@@ -116,7 +115,10 @@ export abstract class Model {
 
     // 添加控制器变化事件监听器
     controls.addEventListener('change', this.cameraControlsChangeHandler);
-
+    controls.addEventListener('change', ()=>{
+      const polarAngle = controls.getPolarAngle(); 
+      console.log(`当前仰角: ${polarAngle} 弧度 (约 ${THREE.MathUtils.radToDeg(polarAngle)} 度)`);
+    });
     return controls;
   }
 
@@ -127,19 +129,6 @@ export abstract class Model {
     // 更新模型旋转
     if (this.mesh) {
       this.mesh.rotation.y = azimuthAngle + Math.PI;
-
-      // 更新相机位置
-      if (camera instanceof THREE.PerspectiveCamera) {
-        camera.position.x = this.mesh.position.x - 2 * Math.sin(azimuthAngle);
-        camera.position.z = this.mesh.position.z - 2 * Math.cos(azimuthAngle);
-
-        // 更新控制器目标
-        controls.target.set(
-          this.mesh.position.x - 3 * Math.sin(azimuthAngle),
-          this.mesh.position.y + 1 * this.modelSize?.height,
-          this.mesh.position.z - 3 * Math.cos(azimuthAngle)
-        );
-      }
     }
 
     // 如果存在事件处理函数，临时移除它
@@ -202,53 +191,6 @@ export abstract class Model {
     window.playerCapsule = this.playerCapsule;
   }
 
-  // 碰撞检测
-  handleCollision(): void {
-    if (!window.worldOctrees || !window.worldOctrees.length || !this.playerCapsule || !this.mesh) return;
-
-    // 遍历所有八叉树进行碰撞检测
-    for (const octree of window.worldOctrees) {
-      // 检查胶囊体是否与八叉树中的物体相交
-      const result = octree.capsuleIntersect(this.playerCapsule);
-
-      // 如果发生碰撞，处理碰撞响应
-      if (result) {
-        // 计算碰撞法线的垂直分量
-        const verticalComponent = Math.abs(result.normal.y);
-
-        // 如果法线有较大的垂直分量，说明是斜坡
-        if (verticalComponent > 0.1) {
-          // 对于斜坡，我们需要沿着斜面移动
-          // 计算沿斜面的移动分量
-          const slideDirection = new THREE.Vector3()
-            .copy(result.normal)
-            .multiplyScalar(result.depth);
-
-          // 将垂直分量稍微放大，以便能够"爬"上斜坡
-          slideDirection.y *= 1.2;
-
-          // 应用移动
-          this.mesh.position.add(slideDirection);
-
-          // 更新胶囊体位置
-          this.playerCapsule.start.add(slideDirection);
-          this.playerCapsule.end.add(slideDirection);
-        } else {
-          // 对于普通碰撞，直接推离碰撞点
-          const pushVector = new THREE.Vector3()
-            .copy(result.normal)
-            .multiplyScalar(result.depth);
-
-          this.mesh.position.add(pushVector);
-
-          // 更新胶囊体位置
-          this.playerCapsule.start.add(pushVector);
-          this.playerCapsule.end.add(pushVector);
-        }
-      }
-    }
-  }
-
   // 移动模型
   move(direction: string, speed: number, delta: number): void {
     if (!this.mesh) return;
@@ -285,54 +227,37 @@ export abstract class Model {
     // 更新位置
     if (this.isWalking) {
       const speed = 100; // 移动速度
-      const azimuthAngle = cameraControls.getAzimuthalAngle();
 
-      if (this.keys.ArrowUp) {
-        this.move('forward', speed, delta);
-        lookCamera.position.x = this.mesh.position.x - 2 * Math.sin(azimuthAngle);
-        lookCamera.position.y = lookCamera.position.y;
-        lookCamera.position.z = this.mesh.position.z - 2 * Math.cos(azimuthAngle);
-      }
-      if (this.keys.ArrowDown) {
-        this.move('backward', speed, delta);
-        lookCamera.position.x = this.mesh.position.x - 2 * Math.sin(azimuthAngle);
-        lookCamera.position.y = lookCamera.position.y;
-        lookCamera.position.z = this.mesh.position.z - 2 * Math.cos(azimuthAngle);
-      }
+      if (this.keys.ArrowUp) this.move('forward', speed, delta);
+      if (this.keys.ArrowDown)this.move('backward', speed, delta);
+      if (this.keys.ArrowLeft)this.move('left', speed, delta);
+      if (this.keys.ArrowRight) this.move('right', speed, delta);
 
-      // 保存旋转状态
-      if (!this.leftRotate) this.leftRotate = this.mesh.rotation.y;
-      if (!this.rightRotate) this.rightRotate = this.mesh.rotation.y;
-
-      if (this.keys.ArrowLeft) {
-        this.move('left', speed, delta);
-        lookCamera.position.x = this.mesh.position.x - 2 * Math.sin(azimuthAngle);
-        lookCamera.position.y = lookCamera.position.y;
-        lookCamera.position.z = this.mesh.position.z - 2 * Math.cos(azimuthAngle);
-        this.leftRotate = this.mesh.rotation.y;
-      }
-      if (this.keys.ArrowRight) {
-        this.move('right', speed, delta);
-        lookCamera.position.x = this.mesh.position.x - 2 * Math.sin(azimuthAngle);
-        lookCamera.position.y = lookCamera.position.y;
-        lookCamera.position.z = this.mesh.position.z - 2 * Math.cos(azimuthAngle);
-        this.rightRotate = this.mesh.rotation.y;
-      }
-
-      // 更新相机目标
-      cameraControls.target.set(
-        this.mesh.position.x - 3 * Math.sin(azimuthAngle),
-        this.mesh.position.y + 1 * this.modelSize?.height,
-        this.mesh.position.z - 3 * Math.cos(azimuthAngle)
+      // 参考characterMovement.js中的相机处理方式
+      // 关键改变：不直接设置相机位置，而是调整控制器目标
+      
+      // 保存相机当前位置相对于目标点的偏移
+      const cameraOffset = new THREE.Vector3().subVectors(
+        lookCamera.position,
+        cameraControls.target
       );
+      
+      // 更新控制器目标到角色位置
+      cameraControls.target.copy(this.mesh.position);
+      
+      // 根据角色高度调整目标点Y坐标
+      cameraControls.target.y += 1 * this.modelSize?.height;
+      
+      // 根据保存的偏移更新相机位置
+      lookCamera.position.copy(cameraControls.target).add(cameraOffset);
+      
+      // 更新控制器，应用变更
+      cameraControls.update();
     }
-    // 检查是否存在worldBVHMeshes，如果存在则使用BVH碰撞检测
-    if (window.worldBVHMeshes && window.worldBVHMeshes.length > 0) {
-      this.handleBVHCollision();
-    }
-    // 否则继续使用原有的八叉树碰撞检测
-    else if (window.worldOctrees && window.worldOctrees.length > 0) {
-      this.handleCollision();
+    
+    // 如果存在物理世界，进行物理碰撞检测
+    if (window.physicsWorld) {
+      this.handlePhysicsCollision();
     }
   }
   // 重置模型位置
@@ -404,13 +329,15 @@ export abstract class Model {
       this.stopWalking();
     }
 
-    // 重置旋转状态
-    this.leftRotate = undefined;
-    this.rightRotate = undefined;
   }
 
   // 获取模型三维尺寸
-  abstract getModelDimensions(): { width: number; height: number; depth: number };
+  abstract setModelDimensions(): { width: number; height: number; depth: number };
+  
+  // 获取已计算的模型尺寸
+  getModelDimensions(): { width: number; height: number; depth: number } {
+    return this.modelSize;
+  }
 
   // 开始行走动画 - 子类需要实现具体逻辑
   abstract startWalking(): void;
@@ -418,143 +345,6 @@ export abstract class Model {
   // 停止行走动画 - 子类需要实现具体逻辑
   abstract stopWalking(): void;
 
-  // 使用three-mesh-bvh的碰撞检测
-  handleBVHCollision(): void {
-    if (!window.worldBVHMeshes || !window.worldBVHMeshes.length || !this.playerCapsule || !this.mesh) return;
-
-    // 从capsule获取胶囊体信息
-    const capsuleStart = this.playerCapsule.start.clone();
-    const capsuleEnd = this.playerCapsule.end.clone();
-    const capsuleRadius = this.playerCapsule.radius;
-
-    // 临时变量用于碰撞检测计算
-    const tempVector = new THREE.Vector3();
-    const tempVector2 = new THREE.Vector3();
-    const tempBox = new THREE.Box3();
-    const tempMat = new THREE.Matrix4();
-    const normal = new THREE.Vector3();
-    
-    // 遍历所有使用BVH的网格
-    for (const mesh of window.worldBVHMeshes) {
-      // 跳过没有BVH的网格
-      if (!mesh.geometry.boundsTree) continue;
-      
-      // 获取网格的世界变换的逆矩阵，将胶囊体转换到网格的局部空间
-      tempMat.copy(mesh.matrixWorld).invert();
-
-      // 在局部空间中的胶囊体线段
-      const localStart = capsuleStart.clone().applyMatrix4(tempMat);
-      const localEnd = capsuleEnd.clone().applyMatrix4(tempMat);
-      
-      // 创建本地空间的线段
-      const localSegment = new THREE.Line3(localStart, localEnd);
-
-      // 创建边界盒，用于快速检测
-      tempBox.makeEmpty();
-      tempBox.expandByPoint(localStart);
-      tempBox.expandByPoint(localEnd);
-      // 扩展边界盒，考虑胶囊体半径
-      tempBox.min.addScalar(-capsuleRadius);
-      tempBox.max.addScalar(capsuleRadius);
-
-      let collisionOccurred = false;
-      let isRamp = false; // 是否是斜坡
-      
-      // 使用BVH进行碰撞检测
-      mesh.geometry.boundsTree.shapecast({
-        intersectsBounds: box => box.intersectsBox(tempBox),
-        
-        intersectsTriangle: tri => {
-          // 计算三角形到胶囊体线段的最短距离点
-          const triPoint = tempVector.clone();
-          const capsulePoint = tempVector2.clone();
-          
-          // 使用三角形到线段的最短距离函数
-          const distance = tri.closestPointToSegment(localSegment, triPoint, capsulePoint);
-          
-          // 如果距离小于胶囊体半径，认为发生碰撞
-          if (distance < capsuleRadius) {
-            console.log("碰撞");
-            
-            // 获取三角形法线
-            tri.getNormal(normal);
-            
-            // 计算需要移动的深度和方向
-            const depth = capsuleRadius - distance;
-            const direction = capsulePoint.sub(triPoint).normalize();
-            
-            // 判断是否为斜坡：通过检查法线与垂直向上的夹角
-            // normal.y是法线的垂直分量，值接近1表示表面接近水平
-            // 0.7 ≈ cos(45°)，表示斜率小于45度的表面视为可攀爬的斜坡
-            
-            if (normal.y > Math.cos(Math.PI / 4)) {
-              // 这是可攀爬的斜坡
-              isRamp = true;
-              
-              // 沿斜坡表面滑动（包含一些垂直分量，使人物能够攀爬）
-              const slideDirection = new THREE.Vector3().copy(direction);
-              // 稍微增强垂直分量
-              slideDirection.y *= 1.2;
-              
-              localSegment.start.addScaledVector(slideDirection, depth);
-              localSegment.end.addScaledVector(slideDirection, depth);
-            } else {
-              // 这是陡峭表面（如柱子），无法攀爬
-              // 水平阻挡，但不向上移动
-              const blockDirection = new THREE.Vector3().copy(direction);
-              
-              // 保留水平分量，但不要垂直攀爬
-              blockDirection.y = 0;
-              // 如果水平分量为零，防止归一化错误
-              if (blockDirection.lengthSq() > 0.001) {
-                blockDirection.normalize();
-                localSegment.start.addScaledVector(blockDirection, depth);
-                localSegment.end.addScaledVector(blockDirection, depth);
-              } else {
-                // 完全垂直碰撞，向后轻微推
-                const backDirection = new THREE.Vector3().copy(this.mesh.position).sub(triPoint).normalize();
-                backDirection.y = 0;
-                if (backDirection.lengthSq() > 0.001) {
-                  backDirection.normalize();
-                  localSegment.start.addScaledVector(backDirection, depth);
-                  localSegment.end.addScaledVector(backDirection, depth);
-                }
-              }
-            }
-            
-            collisionOccurred = true;
-          }
-          
-          // 继续检查其他三角形
-          return false;
-        }
-      });
-      
-      // 如果发生碰撞，更新模型位置
-      if (collisionOccurred) {
-        // 将调整后的胶囊体起点转回世界空间
-        const newPosition = new THREE.Vector3().copy(localSegment.start).applyMatrix4(mesh.matrixWorld);
-        
-        // 计算模型需要移动的向量
-        const deltaVector = new THREE.Vector3().subVectors(newPosition, this.mesh.position);
-        
-        // 如果是非斜坡碰撞，限制垂直移动
-        if (!isRamp) {
-          deltaVector.y = Math.min(deltaVector.y, 0); // 只允许向下或水平移动，不能向上
-        }
-        
-        // 应用位移
-        const offset = Math.max(0.0, deltaVector.length() - 1e-5);
-        if (offset > 0) {
-          deltaVector.normalize().multiplyScalar(offset);
-          this.mesh.position.add(deltaVector);
-        }
-        
-        // 更新胶囊体位置
-        this.updateCapsulePosition();
-      }
-    }
-  }
   // 创建胶囊体碰撞检测
   createCapsule(): { playerCapsule: Capsule, capsuleVisual: THREE.Mesh } {
     // 使用this.modelSize获取模型精确尺寸
@@ -626,6 +416,135 @@ export abstract class Model {
 
     return { playerCapsule, capsuleVisual };
   }
+
+  // 创建物理身体
+  createPhysicsBody(): void {
+    if (!window.physicsWorld || !this.mesh) return;
+    
+    // 获取模型尺寸
+    const dimensions = this.getModelDimensions();
+    
+    // 计算胶囊体参数
+    const radius = Math.max(dimensions.width, dimensions.depth) / 4;
+    const height = dimensions.height;
+    
+    // 创建物理身体 - 使用胶囊体（由圆柱体和两个球体组成）
+    // 创建一个复合形状来模拟胶囊体
+    const body = new CANNON.Body({
+      mass: 80, // 质量，单位kg
+      position: new CANNON.Vec3(
+        this.mesh.position.x,
+        this.mesh.position.y + height / 2, // 将身体位置调整到模型中心
+        this.mesh.position.z
+      ),
+      fixedRotation: true, // 防止身体旋转
+      linearDamping: 0.9, // 线性阻尼，减少滑动
+      material: new CANNON.Material({
+        friction: 0.5,
+        restitution: 0.3
+      })
+    });
+    
+    // 计算圆柱体的高度（总高度减去两端的球体）
+    const cylinderHeight = Math.max(0, height - 2 * radius);
+    
+    // 1. 添加中间的圆柱体部分
+    const cylinderShape = new CANNON.Cylinder(radius, radius, cylinderHeight, 16);
+    body.addShape(cylinderShape, new CANNON.Vec3(0, 0, 0), new CANNON.Quaternion().setFromAxisAngle(
+      new CANNON.Vec3(1, 0, 0), 
+      Math.PI / 2
+    ));
+    
+    // 2. 添加顶部球体
+    const topSphere = new CANNON.Sphere(radius);
+    body.addShape(topSphere, new CANNON.Vec3(0, cylinderHeight/2, 0));
+    
+    // 3. 添加底部球体
+    const bottomSphere = new CANNON.Sphere(radius);
+    body.addShape(bottomSphere, new CANNON.Vec3(0, -cylinderHeight/2, 0));
+    
+    // 添加碰撞事件监听器
+    body.addEventListener('collide', (event: CollideEvent) => {
+      console.log('碰撞事件', event);
+      
+      // 获取碰撞信息
+      const contact = event.contact;
+      
+      // 确定哪个是玩家身体，哪个是碰撞物体
+      const playerBody = window.playerBody;
+      if (!playerBody) return; // 如果playerBody未定义，直接返回
+      
+      const otherBody = event.body === playerBody ? event.target : event.body;
+      
+      // 计算碰撞法线和深度
+      const normal = contact.ni; // 碰撞法线
+      const depth = contact.getImpactVelocityAlongNormal(); // 碰撞深度/速度
+      
+      console.log('碰撞详情:', {
+        碰撞点: contact.bi.position,
+        碰撞法线: normal,
+        碰撞深度: depth,
+        碰撞物体类型: otherBody.type === CANNON.Body.STATIC ? '静态' : '动态'
+      });
+      
+      // 根据碰撞情况调整模型位置
+      if (Math.abs(normal.y) > 0.5) {
+        // 垂直碰撞（地面或天花板）
+        // 将模型位置与物理身体同步
+        this.mesh.position.y = playerBody.position.y - height / 2; // 调整为底部对齐
+      } else {
+        // 水平碰撞（墙壁等）
+        // 计算推力
+        const pushForce = new CANNON.Vec3(normal.x, 0, normal.z).scale(Math.abs(depth) * 0.1);
+        
+        // 应用推力
+        playerBody.velocity.vadd(pushForce, playerBody.velocity);
+        
+        // 同步X和Z位置
+        this.mesh.position.x = playerBody.position.x;
+        this.mesh.position.z = playerBody.position.z;
+      }
+      
+      // 更新胶囊体位置
+      this.updateCapsulePosition();
+    });
+    
+    // 添加到物理世界
+    window.physicsWorld.addBody(body);
+    
+    // 保存到全局变量
+    window.playerBody = body;
+    
+    console.log("创建物理胶囊体:", {
+      位置: body.position,
+      半径: radius,
+      圆柱体高度: cylinderHeight,
+      总高度: height,
+      形状数量: body.shapes.length
+    });
+  }
+  
+  // 使用物理引擎进行碰撞检测
+  handlePhysicsCollision(): void {
+    if (!window.physicsWorld || !this.mesh || !window.playerBody) return;
+    
+    // 获取模型尺寸，用于计算偏移
+    const dimensions = this.getModelDimensions();
+    const height = dimensions.height;
+    
+    // 同步模型位置到物理身体的XZ平面
+    window.playerBody.position.x = this.mesh.position.x;
+    window.playerBody.position.z = this.mesh.position.z;
+    
+    // 计算物理胶囊体中心点相对于模型底部的偏移
+    // 胶囊体中心应该在模型中心高度位置
+    window.playerBody.position.y = this.mesh.position.y + height / 2;
+    
+    // 物理引擎会在ThreeModel.vue的animate函数中处理碰撞
+    // 并将结果同步回模型位置
+    
+    // 注意：实际的碰撞响应现在由collide事件处理
+  }
 }
 
 // 添加全局声明
@@ -638,17 +557,19 @@ declare global {
       radius: number;
       height: number;
     };
-    worldOctrees?: any[];
-    worldBVHMeshes?: THREE.Mesh[];
     helpersVisible?: {
       skeletonHelper?: THREE.SkeletonHelper;
       boxHelper?: THREE.BoxHelper;
       capsuleVisual?: THREE.Mesh;
-      octreeHelpers?: THREE.Object3D[];
-      bvhHelpers?: any[];
     };
     cameraHelpers?: {
       lookCameraHelper?: THREE.CameraHelper;
     };
+    // Cannon.js 物理世界
+    physicsWorld?: CANNON.World;
+    // 物理对象与Three.js对象的映射
+    physicsBodies?: Map<CANNON.Body, THREE.Object3D>;
+    // 角色物理身体
+    playerBody?: CANNON.Body;
   }
 } 
