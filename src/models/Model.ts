@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { MeshBVH } from 'three-mesh-bvh';
 // 导入cannon-es物理引擎
 import * as CANNON from 'cannon-es';
+import { GlobalState } from '../types/GlobalState';
 
 // 定义碰撞事件接口
 interface CollideEvent {
@@ -12,6 +13,8 @@ interface CollideEvent {
   target: CANNON.Body;
   contact: CANNON.ContactEquation;
 }
+
+// GlobalState接口现在在ThreeModel.vue中定义
 
 // 基础模型类 - 包含通用功能如键盘事件、胶囊体碰撞、移动等
 export abstract class Model {
@@ -39,11 +42,30 @@ export abstract class Model {
     visual: THREE.Mesh;
   };
 
+  // 物理身体
+  private playerBody?: CANNON.Body;
+
+  // 相机辅助器
+  private cameraHelpers?: {
+    lookCameraHelper?: THREE.CameraHelper;
+  };
+
+  // 模型辅助器
+  private helpersVisible?: {
+    skeletonHelper?: THREE.SkeletonHelper;
+    boxHelper?: THREE.BoxHelper;
+    capsuleVisual?: THREE.Mesh;
+  };
+
   // 相机控制器相关
   private cameraControlsChangeHandler?: (event: any) => void;
   private controlsChangeTimeout?: number;
 
-  constructor() {
+  // 全局状态引用
+  protected globalState: GlobalState;
+
+  constructor(globalState: GlobalState) {
+    this.globalState = globalState;
     this.keys = {
       ArrowUp: false,
       ArrowDown: false,
@@ -80,11 +102,11 @@ export abstract class Model {
     // 添加相机辅助线到场景
     scene.add(cameraHelper);
 
-    // 将相机辅助线存储到全局变量，以便其他地方可以访问
-    if (!window.cameraHelpers) {
-      window.cameraHelpers = {};
+    // 将相机辅助线存储到私有属性
+    if (!this.cameraHelpers) {
+      this.cameraHelpers = {};
     }
-    window.cameraHelpers.lookCameraHelper = cameraHelper;
+    this.cameraHelpers.lookCameraHelper = cameraHelper;
 
     return camera;
   }
@@ -187,8 +209,6 @@ export abstract class Model {
       this.mesh.position.z
     );
 
-    // 更新全局引用
-    window.playerCapsule = this.playerCapsule;
   }
 
   // 移动模型
@@ -232,33 +252,34 @@ export abstract class Model {
       if (this.keys.ArrowDown)this.move('backward', speed, delta);
       if (this.keys.ArrowLeft)this.move('left', speed, delta);
       if (this.keys.ArrowRight) this.move('right', speed, delta);
-
-      // 参考characterMovement.js中的相机处理方式
-      // 关键改变：不直接设置相机位置，而是调整控制器目标
-      
-      // 保存相机当前位置相对于目标点的偏移
-      const cameraOffset = new THREE.Vector3().subVectors(
-        lookCamera.position,
-        cameraControls.target
-      );
-      
-      // 更新控制器目标到角色位置
-      cameraControls.target.copy(this.mesh.position);
-      
-      // 根据角色高度调整目标点Y坐标
-      cameraControls.target.y += 1 * this.modelSize?.height;
-      
-      // 根据保存的偏移更新相机位置
-      lookCamera.position.copy(cameraControls.target).add(cameraOffset);
-      
-      // 更新控制器，应用变更
-      cameraControls.update();
     }
     
-    // 如果存在物理世界，进行物理碰撞检测
-    if (window.physicsWorld) {
+    // 如果存在物理世界，处理用户输入到物理身体的同步
+    if (this.globalState.physicsWorld) {
+      // 处理用户输入到物理身体的同步（仅在移动时）
       this.handlePhysicsCollision();
+
+      // 注意：物理引擎计算和结果同步现在在ThreeModel.vue中控制时机
     }
+
+    // 无论是否在行走，都更新相机位置，确保在重力下落时相机也会跟随
+    // 保存相机当前位置相对于目标点的偏移
+    const cameraOffset = new THREE.Vector3().subVectors(
+      lookCamera.position,
+      cameraControls.target
+    );
+    
+    // 更新控制器目标到角色位置
+    cameraControls.target.copy(this.mesh.position);
+    
+    // 根据角色高度调整目标点Y坐标
+    cameraControls.target.y += 1 * this.modelSize?.height;
+    
+    // 根据保存的偏移更新相机位置
+    lookCamera.position.copy(cameraControls.target).add(cameraOffset);
+    
+    // 更新控制器，应用变更
+    cameraControls.update();
   }
   // 重置模型位置
   resetPosition(): void {
@@ -269,8 +290,8 @@ export abstract class Model {
 
   // 切换辅助线可见性
   toggleHelpers(): void {
-    if (window.helpersVisible) {
-      const { boxHelper, capsuleVisual } = window.helpersVisible;
+    if (this.helpersVisible) {
+      const { boxHelper, capsuleVisual } = this.helpersVisible;
 
       // 获取当前状态（以胶囊体为准）
       const currentVisibility = capsuleVisual ? capsuleVisual.visible : true;
@@ -400,9 +421,6 @@ export abstract class Model {
       height: dimensions.height
     };
 
-    // 保存全局引用
-    window.capsuleParams = this.capsuleParams;
-
     console.log('创建胶囊体:', {
       模型位置: this.mesh.position,
       模型尺寸: dimensions,
@@ -419,7 +437,7 @@ export abstract class Model {
 
   // 创建物理身体
   createPhysicsBody(): void {
-    if (!window.physicsWorld || !this.mesh) return;
+    if (!this.globalState.physicsWorld || !this.mesh) return;
     
     // 获取模型尺寸
     const dimensions = this.getModelDimensions();
@@ -466,15 +484,14 @@ export abstract class Model {
     // 添加碰撞事件监听器
     body.addEventListener('collide', (event: CollideEvent) => {
       console.log('碰撞事件', event);
-      
+
       // 获取碰撞信息
       const contact = event.contact;
-      
+
       // 确定哪个是玩家身体，哪个是碰撞物体
-      const playerBody = window.playerBody;
-      if (!playerBody) return; // 如果playerBody未定义，直接返回
-      
-      const otherBody = event.body === playerBody ? event.target : event.body;
+      if (!this.playerBody) return; // 如果playerBody未定义，直接返回
+
+      const otherBody = event.body === this.playerBody ? event.target : event.body;
       
       // 计算碰撞法线和深度
       const normal = contact.ni; // 碰撞法线
@@ -491,18 +508,18 @@ export abstract class Model {
       if (Math.abs(normal.y) > 0.5) {
         // 垂直碰撞（地面或天花板）
         // 将模型位置与物理身体同步
-        this.mesh.position.y = playerBody.position.y - height / 2; // 调整为底部对齐
+        this.mesh.position.y = this.playerBody.position.y - height / 2; // 调整为底部对齐
       } else {
         // 水平碰撞（墙壁等）
         // 计算推力
         const pushForce = new CANNON.Vec3(normal.x, 0, normal.z).scale(Math.abs(depth) * 0.1);
-        
+
         // 应用推力
-        playerBody.velocity.vadd(pushForce, playerBody.velocity);
-        
+        this.playerBody.velocity.vadd(pushForce, this.playerBody.velocity);
+
         // 同步X和Z位置
-        this.mesh.position.x = playerBody.position.x;
-        this.mesh.position.z = playerBody.position.z;
+        this.mesh.position.x = this.playerBody.position.x;
+        this.mesh.position.z = this.playerBody.position.z;
       }
       
       // 更新胶囊体位置
@@ -510,10 +527,10 @@ export abstract class Model {
     });
     
     // 添加到物理世界
-    window.physicsWorld.addBody(body);
-    
-    // 保存到全局变量
-    window.playerBody = body;
+    this.globalState.physicsWorld.addBody(body);
+
+    // 保存到私有变量
+    this.playerBody = body;
     
     console.log("创建物理胶囊体:", {
       位置: body.position,
@@ -526,50 +543,107 @@ export abstract class Model {
   
   // 使用物理引擎进行碰撞检测
   handlePhysicsCollision(): void {
-    if (!window.physicsWorld || !this.mesh || !window.playerBody) return;
-    
+    if (!this.globalState.physicsWorld || !this.mesh || !this.playerBody) return;
+
     // 获取模型尺寸，用于计算偏移
     const dimensions = this.getModelDimensions();
     const height = dimensions.height;
-    
-    // 同步模型位置到物理身体的XZ平面
-    window.playerBody.position.x = this.mesh.position.x;
-    window.playerBody.position.z = this.mesh.position.z;
-    
-    // 计算物理胶囊体中心点相对于模型底部的偏移
-    // 胶囊体中心应该在模型中心高度位置
-    window.playerBody.position.y = this.mesh.position.y + height / 2;
-    
-    // 物理引擎会在ThreeModel.vue的animate函数中处理碰撞
-    // 并将结果同步回模型位置
-    
-    // 注意：实际的碰撞响应现在由collide事件处理
+
+    // 只在用户输入时同步模型位置到物理身体（用于移动控制）
+    if (this.isWalking) {
+      // 同步模型位置到物理身体的XZ平面
+      this.playerBody.position.x = this.mesh.position.x;
+      this.playerBody.position.z = this.mesh.position.z;
+
+      // 计算物理胶囊体中心点相对于模型底部的偏移
+      // 胶囊体中心应该在模型中心高度位置
+      this.playerBody.position.y = this.mesh.position.y + height / 2;
+    }
+
+    // 物理引擎会在每帧计算碰撞，然后通过syncPhysicsToModel同步回模型
+  }
+
+  /**
+   * 同步物理身体到模型位置
+   * 这个方法会在每帧更新时自动调用，将物理引擎的计算结果同步到模型
+   */
+  protected syncPhysicsToModel(): void {
+    if (this.playerBody && this.mesh) {
+      // 获取模型尺寸，用于计算正确的位置偏移
+      const dimensions = this.getModelDimensions();
+      const height = dimensions.height;
+
+      // 始终同步物理身体的位置到模型
+      // 计算模型底部位置 = 胶囊体中心位置 - 高度/2
+      this.mesh.position.y = this.playerBody.position.y - height / 2;
+      this.mesh.position.x = this.playerBody.position.x;
+      this.mesh.position.z = this.playerBody.position.z;
+    }
+  }
+
+  /**
+   * 自动更新胶囊体位置
+   * 这个方法会在每帧更新时自动调用
+   */
+  protected autoUpdateCapsulePosition(): void {
+    if (this.mesh) {
+      this.updateCapsulePosition();
+    }
+  }
+
+  /**
+   * 公共方法：同步物理状态到模型
+   * 在物理引擎更新后调用，将物理计算结果同步到模型
+   */
+  public syncFromPhysics(): void {
+    this.syncPhysicsToModel();
+    this.autoUpdateCapsulePosition();
+  }
+
+  /**
+   * 获取物理身体（用于调试或特殊需求）
+   */
+  public getPhysicsBody(): CANNON.Body | undefined {
+    return this.playerBody;
+  }
+
+  /**
+   * 检查是否有物理身体
+   */
+  public hasPhysicsBody(): boolean {
+    return this.playerBody !== undefined;
+  }
+
+  /**
+   * 更新相机辅助器
+   */
+  public updateCameraHelpers(): void {
+    this.cameraHelpers?.lookCameraHelper?.update();
+  }
+
+  /**
+   * 更新模型辅助器
+   */
+  public updateModelHelpers(): void {
+    if (this.helpersVisible) {
+      const { boxHelper, capsuleVisual } = this.helpersVisible;
+
+      // 更新包围盒辅助线
+      if (boxHelper && this.mesh) {
+        boxHelper.update();
+      }
+
+      // 更新胶囊体可视化位置（使用正确的计算逻辑）
+      if (capsuleVisual && this.mesh && this.capsuleParams) {
+        const cylinderHeight = Math.max(0, this.capsuleParams.height ?? 0);
+        capsuleVisual.position.set(
+          this.mesh.position.x,
+          this.mesh.position.y + cylinderHeight / 2, // 上移radius距离，防止底部穿入地面
+          this.mesh.position.z
+        );
+      }
+    }
   }
 }
 
-// 添加全局声明
-declare global {
-  interface Window {
-    updateModelHelpers?: () => void;
-    playerCapsule?: Capsule;
-    capsuleParams?: {
-      visual: THREE.Mesh;
-      radius: number;
-      height: number;
-    };
-    helpersVisible?: {
-      skeletonHelper?: THREE.SkeletonHelper;
-      boxHelper?: THREE.BoxHelper;
-      capsuleVisual?: THREE.Mesh;
-    };
-    cameraHelpers?: {
-      lookCameraHelper?: THREE.CameraHelper;
-    };
-    // Cannon.js 物理世界
-    physicsWorld?: CANNON.World;
-    // 物理对象与Three.js对象的映射
-    physicsBodies?: Map<CANNON.Body, THREE.Object3D>;
-    // 角色物理身体
-    playerBody?: CANNON.Body;
-  }
-} 
+// 全局声明现在通过GlobalState接口管理，不再使用window全局变量

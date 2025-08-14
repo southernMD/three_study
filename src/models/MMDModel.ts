@@ -7,15 +7,17 @@ import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { KeyframeTrack } from 'three';
 import { Model } from './Model';
+import { GlobalState } from '../types/GlobalState';
 
 // MMDModel类 - 继承自Model基类，特化为MMD模型
 export class MMDModel extends Model {
   declare mesh: THREE.SkinnedMesh<THREE.BufferGeometry<THREE.NormalBufferAttributes>, THREE.Material | THREE.Material[]>;
   walkAction?: AnimationAction;
   standAction?: AnimationAction;
+  private helper: MMDAnimationHelper | null = null;
   
-  constructor() {
-    super();
+  constructor(globalState: GlobalState) {
+    super(globalState);
     this.mesh = new THREE.SkinnedMesh();
   }
 
@@ -51,8 +53,8 @@ export class MMDModel extends Model {
     try {
       // 加载模型
       const mmd = await loadModel();
-      const helper = new MMDAnimationHelper();
-      helper.add(mmd, { physics: true });
+      this.helper = new MMDAnimationHelper();
+      this.helper.add(mmd, { physics: false }); // 禁用MMD物理引擎，使用我们自己的Cannon.js物理引擎
       this.mesh = mmd;
       const meshSize = this.setModelDimensions()
       const minWidth = 10;  // 网格基本单位
@@ -65,8 +67,8 @@ export class MMDModel extends Model {
       // 创建胶囊体
       const { playerCapsule,capsuleVisual } = this.createCapsule();
 
-      // 设置全局引用
-      window.playerCapsule = playerCapsule;
+      // 设置全局状态引用
+      this.playerCapsule = playerCapsule;
       
       // 创建物理身体
       this.createPhysicsBody();
@@ -112,40 +114,24 @@ export class MMDModel extends Model {
       
     scene.add(capsuleVisual);
 
-    // 初始化辅助线可见性对象
-    window.helpersVisible = {
+    // 初始化辅助线可见性对象（使用父类的私有属性）
+    this.helpersVisible = {
       skeletonHelper: skeletonHelper,
       boxHelper: boxHelper,
       capsuleVisual: capsuleVisual
     };
-    
-    // 设置更新函数
-    window.updateModelHelpers = () => {
-      if (window.helpersVisible) {
-        const { boxHelper, capsuleVisual } = window.helpersVisible;
-        
-        // 更新包围盒辅助线
-        if (boxHelper) {
-          boxHelper.update();
-        }
-        // 更新胶囊体位置
-        if (capsuleVisual && this.mesh) {
-          const cylinderHeight = Math.max(0, this.capsuleParams?.height ?? 0 );
-          capsuleVisual.position.set(
-            this.mesh.position.x,
-            this.mesh.position.y + cylinderHeight / 2, // 上移radius距离，防止底部穿入地面
-            this.mesh.position.z
-          );
-        }
-      }
-      
-      // 更新胶囊体位置
-      this.updateCapsulePosition();
-    };
+
+    // 注意：updateModelHelpers方法现在在父类Model中定义
   }
   
   // 更新动画
   updateAnimation(deltaTime: number): void {
+    // 更新MMD动画助手
+    if (this.helper) {
+      this.helper.update(deltaTime);
+    }
+
+    // 更新动画混合器
     if (this.mixer) {
       this.mixer.update(deltaTime);
     }
@@ -203,23 +189,4 @@ export class MMDModel extends Model {
   }
 }
 
-// 添加全局声明
-declare global {
-  interface Window {
-    updateModelHelpers?: () => void;
-    playerCapsule?: Capsule;
-    capsuleParams?: {
-      visual: THREE.Mesh;
-      radius: number;
-      height: number;
-    };
-    helpersVisible?: {
-      skeletonHelper?: THREE.SkeletonHelper;
-      boxHelper?: THREE.BoxHelper;
-      capsuleVisual?: THREE.Mesh;
-    };
-    cameraHelpers?: {
-      lookCameraHelper?: THREE.CameraHelper;
-    };
-  }
-} 
+// 全局声明现在通过GlobalState接口管理，不再使用window全局变量

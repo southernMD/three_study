@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { Model } from './Model';
+import { GlobalState } from '../types/GlobalState';
 
 // 定义GLTF类型
 interface GLTF {
@@ -27,8 +28,8 @@ export class GLTFModel extends Model {
   walkAction?: THREE.AnimationAction;
   standAction?: THREE.AnimationAction;
   animations: THREE.AnimationClip[] = [];
-  constructor() {
-    super();
+  constructor(globalState: GlobalState) {
+    super(globalState);
     this.mesh = new THREE.Object3D();
     this.mixer = new THREE.AnimationMixer(this.mesh);
   }
@@ -69,8 +70,8 @@ export class GLTFModel extends Model {
       
       const { playerCapsule, capsuleVisual } = this.createCapsule();
       
-      // 设置全局引用
-      window.playerCapsule = playerCapsule;
+      // 设置全局状态引用
+      this.playerCapsule = playerCapsule;
       
       // 创建物理身体
       this.createPhysicsBody();
@@ -126,36 +127,13 @@ export class GLTFModel extends Model {
     scene.add(boxHelper);
     scene.add(capsuleVisual);
     
-    // 保存引用以便控制可见性
-    window.helpersVisible = {
+    // 保存引用以便控制可见性（使用父类的私有属性）
+    this.helpersVisible = {
       boxHelper,
       capsuleVisual
     };
-    
-    // 创建更新辅助线的函数
-    window.updateModelHelpers = () => {
-      if (window.helpersVisible) {
-        const { boxHelper, capsuleVisual } = window.helpersVisible;
-        
-        // 更新包围盒辅助线
-        if (boxHelper) {
-          boxHelper.update();
-        }
-        
-        // 更新胶囊体位置
-        if (capsuleVisual && this.mesh) {
-          const cylinderHeight = Math.max(0, this.capsuleParams?.height ?? 0 );
-          capsuleVisual.position.set(
-            this.mesh.position.x,
-            this.mesh.position.y + cylinderHeight / 2, // 上移radius距离，防止底部穿入地面
-            this.mesh.position.z
-          );
-        }
-      }
-      
-      // 更新胶囊体位置
-      this.updateCapsulePosition();
-    };
+
+    // 注意：updateModelHelpers方法现在在父类Model中定义
   }
   
   // 实现基类的抽象方法 - 开始行走
