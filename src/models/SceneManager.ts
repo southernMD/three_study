@@ -22,7 +22,7 @@ export class SceneManager {
 
   constructor() {
     this.scene = new THREE.Scene();
-    this.initializeScene();
+    // this.initializeScene();
   }
 
   /**

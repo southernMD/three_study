@@ -51,7 +51,7 @@ export abstract class Model {
   };
 
   // 模型辅助器
-  private helpersVisible?: {
+  protected helpersVisible?: {
     skeletonHelper?: THREE.SkeletonHelper;
     boxHelper?: THREE.BoxHelper;
     capsuleVisual?: THREE.Mesh;

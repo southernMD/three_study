@@ -11,6 +11,7 @@ import { MMDModelManager } from '../models/MMDModelManager';
 import { TestBoxManager } from '../models/TestBoxManager';
 import { SceneManager } from '../models/SceneManager';
 import { PhysicsManager } from '../models/PhysicsManager';
+import { OvalRunningTrack } from '../models/architecture/OvalRunningTrack';
 import { GlobalState } from '../types/GlobalState';
 // 导入cannon-es物理引擎
 import * as CANNON from 'cannon-es';
@@ -32,6 +33,7 @@ let mmdModelManager: MMDModelManager
 let testBoxManager: TestBoxManager
 let sceneManager: SceneManager
 let physicsManager: PhysicsManager
+let runningTrack: OvalRunningTrack
 
 // 全局状态对象
 let globalState: GlobalState
@@ -77,6 +79,18 @@ const guiFn = {
     if (physicsManager) {
       physicsManager.showPhysicsInfo();
     }
+  },
+  // 显示跑道信息
+  showTrackInfo: () => {
+    if (runningTrack) {
+      console.log('跑道信息:', runningTrack.getTrackInfo());
+    }
+  },
+  // 重置跑道位置
+  resetTrackPosition: () => {
+    if (runningTrack) {
+      runningTrack.setPosition(0, 0, 0);
+    }
   }
 }
 
@@ -88,6 +102,11 @@ gui.add(guiFn, 'forceStand').name('播放站立动画')
 gui.add(guiFn, 'createBoxHere').name('在当前位置创建箱子')
 gui.add(guiFn, 'createFallingBoxesNow').name('创建掉落的盒子')
 gui.add(guiFn, 'showPhysicsInfo').name('显示物理信息')
+
+// 跑道控制
+const trackFolder = gui.addFolder('跑道控制')
+trackFolder.add(guiFn, 'showTrackInfo').name('显示跑道信息')
+trackFolder.add(guiFn, 'resetTrackPosition').name('重置跑道位置')
 
 // gridHelper现在由SceneManager管理
 
@@ -128,7 +147,15 @@ onMounted(async () => {
     cameraControls = mmdModelManager.getCameraControls();
 
     // 初始化测试物体
-    testBoxManager.initializeTestObjects();
+    // testBoxManager.initializeTestObjects();
+
+    // 创建椭圆跑道
+    runningTrack = new OvalRunningTrack(scene, globalState.physicsWorld,{
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: 2
+    });
+    await runningTrack.create();
 
     // 创建物理地面
     physicsManager.createGround();

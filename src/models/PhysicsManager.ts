@@ -65,9 +65,9 @@ export class PhysicsManager {
    */
   createGround(): void {
     if (!this.world) return;
-    
-    // 创建地面平面
-    const groundShape = new CANNON.Plane();
+
+    // 创建有限范围的地面盒子（1000x1000）
+    const groundShape = new CANNON.Box(new CANNON.Vec3(500, 1, 500)); // 半尺寸：500x1x500
     const groundBody = new CANNON.Body({
       mass: 0, // 质量为0表示静态物体
       material: new CANNON.Material({
@@ -75,13 +75,12 @@ export class PhysicsManager {
         restitution: 0.3 // 弹性系数
       })
     });
-    
+
     // 添加形状
     groundBody.addShape(groundShape);
-    
-    // 旋转地面使其朝上
-    groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
-    groundBody.position.set(0, 0, 0);
+
+    // 设置地面位置（稍微下沉一点）
+    groundBody.position.set(0, -2, 0);
     
     // 添加碰撞事件监听器
     // groundBody.addEventListener('collide', (event) => {
@@ -91,15 +90,15 @@ export class PhysicsManager {
     // 添加到物理世界
     this.world.addBody(groundBody);
     
-    // 创建地面可视化
-    const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
-    const groundMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x666666,
+    // 创建地面可视化（盒子形状）
+    const groundGeometry = new THREE.BoxGeometry(1000, 2, 1000);
+    const groundMaterial = new THREE.MeshStandardMaterial({
+      color: 0x66ccff,
       transparent: true,
       opacity: 0.8
     });
     const groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
-    groundMesh.rotation.x = -Math.PI / 2;
+    groundMesh.position.set(0, -1, 0); // 与物理体位置一致
     groundMesh.receiveShadow = true;
     this.scene.add(groundMesh);
     

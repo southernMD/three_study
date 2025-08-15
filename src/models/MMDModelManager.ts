@@ -39,10 +39,10 @@ export class MMDModelManager {
    */
   async loadModel(): Promise<void> {
     try {
-      // mmdModel = new GLTFModel();
-      // await mmdModel.load(scene, '/model/newtest.glb');
-      this.mmdModel = new MMDModel(this.globalState);
-      await this.mmdModel.load(this.scene, '/lm/楈柌v2.pmx', '/lm/走路.vmd', '/lm/站立.vmd');
+      this.mmdModel = new GLTFModel(this.globalState);
+      await this.mmdModel.load(this.scene, '/model/newtest.glb');
+      // this.mmdModel = new MMDModel(this.globalState);
+      // await this.mmdModel.load(this.scene, '/lm/楈柌v2.pmx', '/lm/走路.vmd', '/lm/站立.vmd');
       
       // 创建跟随相机
       this.lookCamera = this.mmdModel.createLookCamera(this.scene);
