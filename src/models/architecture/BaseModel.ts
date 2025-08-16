@@ -356,6 +356,46 @@ export abstract class BaseModel {
   }
 
   /**
+   * 获取模型的边界包围盒大小
+   * @param model 要计算边界包围盒的模型对象
+   * @returns 包围盒的尺寸 { width, height, depth }
+   */
+  static getBoundingBoxSize(model: THREE.Object3D): { width: number; height: number; depth: number } {
+    // 创建边界包围盒
+    const box = new THREE.Box3().setFromObject(model);
+
+    // 计算尺寸
+    const size = box.getSize(new THREE.Vector3());
+
+    console.log(`📦 模型 "${model.name}" 的边界包围盒:`);
+    console.log(`   📏 尺寸: ${size.x.toFixed(2)} x ${size.y.toFixed(2)} x ${size.z.toFixed(2)}`);
+    console.log(`   📍 中心: ${box.getCenter(new THREE.Vector3()).toArray().map(v => v.toFixed(2)).join(', ')}`);
+
+    return {
+      width: size.x,
+      height: size.y,
+      depth: size.z
+    };
+  }
+
+  /**
+   * 获取当前模型的边界包围盒大小
+   * @returns 包围盒的尺寸 { width, height, depth }
+   */
+  getBoundingBoxSize(): { width: number; height: number; depth: number } {
+    return BaseModel.getBoundingBoxSize(this.modelGroup);
+  }
+
+  /**
+   * 获取指定对象的边界包围盒大小（实例方法）
+   * @param model 要计算边界包围盒的模型对象
+   * @returns 包围盒的尺寸 { width, height, depth }
+   */
+  getObjectBoundingBoxSize(model: THREE.Object3D): { width: number; height: number; depth: number } {
+    return BaseModel.getBoundingBoxSize(model);
+  }
+
+  /**
    * 抽象方法 - 子类必须实现模型创建逻辑
    */
   abstract create(): Promise<void>;

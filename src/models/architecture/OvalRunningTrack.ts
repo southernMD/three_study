@@ -85,6 +85,7 @@ export class OvalRunningTrack extends BaseModel {
     this.createLaneNumbers();
 
     // 4. 创建物理平面（在模型创建完成后）
+    //TODO: 创建物理平面有问题，直接使用大平面作为替代
     // this.createPhysicsPlane(); // 注释掉跑道物理体
 
     // 5. 添加到场景（模型会立即显示，因为纹理已准备好）

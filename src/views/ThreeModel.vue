@@ -7,11 +7,12 @@ import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { GridHelper } from 'three/src/helpers/GridHelper.js';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 // 导入管理器类
-import { MMDModelManager } from '../models/MMDModelManager';
-import { TestBoxManager } from '../models/TestBoxManager';
-import { SceneManager } from '../models/SceneManager';
-import { PhysicsManager } from '../models/PhysicsManager';
-import { OvalRunningTrack } from '../models/architecture/OvalRunningTrack';
+import { MMDModelManager } from '../models/managers/MMDModelManager';
+import { TestBoxManager } from '../models/managers/TestBoxManager';
+import { SceneManager } from '../models/managers/SceneManager';
+import { PhysicsManager } from '../models/managers/PhysicsManager';
+import { ObjectManager } from '../models/managers/ObjectManager';
+import { PHYSICS_CONSTANTS, getGroundFullSize } from '../constants/PhysicsConstants';
 import { GlobalState } from '../types/GlobalState';
 // 导入cannon-es物理引擎
 import * as CANNON from 'cannon-es';
@@ -33,7 +34,7 @@ let mmdModelManager: MMDModelManager
 let testBoxManager: TestBoxManager
 let sceneManager: SceneManager
 let physicsManager: PhysicsManager
-let runningTrack: OvalRunningTrack
+let objectManager: ObjectManager
 
 // 全局状态对象
 let globalState: GlobalState
@@ -82,14 +83,67 @@ const guiFn = {
   },
   // 显示跑道信息
   showTrackInfo: () => {
-    if (runningTrack) {
-      console.log('跑道信息:', runningTrack.getTrackInfo());
+    const mainTrack = objectManager?.getMainTrack();
+    if (mainTrack) {
+      console.log('跑道信息:', mainTrack.getTrackInfo());
     }
   },
   // 重置跑道位置
   resetTrackPosition: () => {
-    if (runningTrack) {
-      runningTrack.setPosition(0, 0, 0);
+    const mainTrack = objectManager?.getMainTrack();
+    if (mainTrack) {
+      mainTrack.setPosition(0, 0, 0);
+    }
+  },
+  // 显示所有对象信息
+  showAllObjects: () => {
+    console.log('所有静态对象:', objectManager?.getAllObjects());
+    console.log('对象类型统计:', objectManager?.getObjectTypeStats());
+    console.log('对象总数:', objectManager?.getObjectCount());
+  },
+  // 显示物理常量信息
+  showPhysicsConstants: () => {
+    console.log('🔧 物理世界常量:');
+    console.log('   📏 地面半尺寸:', `X=${PHYSICS_CONSTANTS.GROUND_SIZE_X}, Z=${PHYSICS_CONSTANTS.GROUND_SIZE_Z}, Y=${PHYSICS_CONSTANTS.GROUND_SIZE_Y}`);
+    console.log('   📐 地面完整尺寸:', getGroundFullSize());
+    console.log('   🧱 墙体高度:', PHYSICS_CONSTANTS.WALL_HEIGHT);
+    console.log('   🌍 重力:', PHYSICS_CONSTANTS.GRAVITY);
+    console.log('   🤝 地面摩擦力:', PHYSICS_CONSTANTS.GROUND_FRICTION);
+    console.log('   ⚡ 地面弹性:', PHYSICS_CONSTANTS.GROUND_RESTITUTION);
+  },
+  // 创建测试墙体
+  createTestWall: async () => {
+    if (objectManager) {
+      await objectManager.createWallAndDoor('test-wall', {
+        position: { x: 0, y: 0, z: 0 },
+        rotation: { x: 0, y: 0, z: 0 },
+        scale: 1
+      });
+      console.log('✅ 测试墙体创建完成');
+    }
+  },
+  // 移除测试墙体
+  removeTestWall: () => {
+    if (objectManager?.removeObject('test-wall')) {
+      console.log('🗑️ 测试墙体已移除');
+    } else {
+      console.log('❌ 测试墙体不存在');
+    }
+  },
+
+}
+
+// 墙体缩放控制对象
+const wallScaleControl = {
+  scale: 5, // 默认缩放值
+  updateWallScale: () => {
+    const wall = objectManager?.getWall('test-wall');
+    if (wall) {
+      wall.wallScale = wallScaleControl.scale;
+      wall.recreateBoundaryWalls();
+      console.log(`🔧 墙体缩放已更新为: ${wallScaleControl.scale}`);
+    } else {
+      console.log('❌ 测试墙体不存在');
     }
   }
 }
@@ -103,10 +157,26 @@ gui.add(guiFn, 'createBoxHere').name('在当前位置创建箱子')
 gui.add(guiFn, 'createFallingBoxesNow').name('创建掉落的盒子')
 gui.add(guiFn, 'showPhysicsInfo').name('显示物理信息')
 
-// 跑道控制
-const trackFolder = gui.addFolder('跑道控制')
-trackFolder.add(guiFn, 'showTrackInfo').name('显示跑道信息')
-trackFolder.add(guiFn, 'resetTrackPosition').name('重置跑道位置')
+// 对象管理器控制
+const objectFolder = gui.addFolder('静态对象管理')
+objectFolder.add(guiFn, 'showTrackInfo').name('显示跑道信息')
+objectFolder.add(guiFn, 'resetTrackPosition').name('重置跑道位置')
+objectFolder.add(guiFn, 'showAllObjects').name('显示所有对象')
+objectFolder.add(guiFn, 'showPhysicsConstants').name('显示物理常量')
+
+// 墙体和门控制
+const wallFolder = gui.addFolder('墙体和门控制')
+wallFolder.add(guiFn, 'createTestWall').name('创建测试墙体')
+wallFolder.add(guiFn, 'removeTestWall').name('移除测试墙体')
+
+// 墙体缩放控制
+const wallScaleFolder = gui.addFolder('墙体缩放控制')
+wallScaleFolder.add(wallScaleControl, 'scale', 0.1, 20, 0.1)
+  .name('墙体缩放')
+  .onChange(() => {
+    wallScaleControl.updateWallScale();
+  })
+wallScaleFolder.add(wallScaleControl, 'updateWallScale').name('手动更新缩放')
 
 // gridHelper现在由SceneManager管理
 
@@ -149,13 +219,9 @@ onMounted(async () => {
     // 初始化测试物体
     // testBoxManager.initializeTestObjects();
 
-    // 创建椭圆跑道
-    runningTrack = new OvalRunningTrack(scene, globalState.physicsWorld,{
-      position: { x: 0, y: 0, z: 0 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: 2
-    });
-    await runningTrack.create();
+    // 创建对象管理器并创建椭圆跑道
+    objectManager = new ObjectManager(scene, globalState);
+
 
     // 创建物理地面
     physicsManager.createGround();
