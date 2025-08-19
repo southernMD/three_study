@@ -4,6 +4,7 @@ import { OvalRunningTrack } from '../architecture/OvalRunningTrack';
 import { WallAndDoor } from '../architecture/WallAndDoor';
 import { BaseModel } from '../architecture/BaseModel';
 import { GlobalState } from '../../types/GlobalState';
+import { PhysicsManager } from './PhysicsManager';
 
 /**
  * 对象管理器 - 统一管理所有静态模型对象
@@ -13,17 +14,110 @@ export class ObjectManager {
   private physicsWorld: CANNON.World;
   private globalState: GlobalState;
   private objects: Map<string, BaseModel> = new Map();
+  private physicsManager?: PhysicsManager;
 
-  constructor(scene: THREE.Scene, globalState: GlobalState) {
+  constructor(scene: THREE.Scene, globalState: GlobalState, physicsManager?: PhysicsManager) {
     this.scene = scene;
     this.globalState = globalState;
     this.physicsWorld = globalState.physicsWorld!;
+    this.physicsManager = physicsManager;
 
     this.createOvalTrack('main-track', {
       position: { x: 0, y: 0, z: 0 },
       rotation: { x: 0, y: 0, z: 0 },
       scale: 2
     });
+
+    // 直接创建边界墙体
+    this.createBoundaryWalls();
+  }
+
+  /**
+   * 创建边界墙体
+   */
+  private async createBoundaryWalls(): Promise<void> {
+    await this.createWallAndDoor('boundary-walls', {
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: 1
+    });
+    console.log('✅ 边界墙体创建完成');
+  }
+
+  /**
+   * 重新生成边界墙体
+   */
+  async regenerateBoundaryWalls(): Promise<void> {
+    console.log('🔄 开始重新生成边界墙体...');
+
+    // 强制清除现有的边界墙体
+    await this.forceClearBoundaryWalls();
+
+    // 重新创建边界墙体
+    await this.createBoundaryWalls();
+    console.log('✅ 边界墙体重新生成完成');
+  }
+
+  /**
+   * 强制清除边界墙体
+   */
+  private async forceClearBoundaryWalls(): Promise<void> {
+    console.log('🗑️ 强制清除边界墙体...');
+
+    // 方法1：通过对象管理器清除
+    if (this.objects.has('boundary-walls')) {
+      const wallObject = this.objects.get('boundary-walls');
+      if (wallObject) {
+        wallObject.dispose();
+        this.objects.delete('boundary-walls');
+        console.log('✅ 通过对象管理器清除完成');
+      }
+    }
+
+    // 方法2：直接从场景中查找并清除所有边界墙体相关对象
+    const objectsToRemove: THREE.Object3D[] = [];
+    this.scene.traverse((child) => {
+      if (child.name.includes('BoundaryWall') ||
+          child.name.includes('ClippingPlane') ||
+          child.name.includes('BoundaryPoint') ||
+          child.name.includes('PhysicsWallVisualization')) {
+        objectsToRemove.push(child);
+      }
+    });
+
+    objectsToRemove.forEach(obj => {
+      this.scene.remove(obj);
+      // 释放资源
+      if (obj instanceof THREE.Mesh) {
+        if (obj.geometry) obj.geometry.dispose();
+        if (obj.material) {
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach(mat => mat.dispose());
+          } else {
+            obj.material.dispose();
+          }
+        }
+      }
+    });
+
+    console.log(`🗑️ 从场景中清除了 ${objectsToRemove.length} 个边界墙体相关对象`);
+  }
+
+  /**
+   * 重新生成地面和边界墙体
+   */
+  async regenerateGroundAndWalls(): Promise<void> {
+    console.log('🔄 开始重新生成地面和边界墙体...');
+
+    // 重新创建物理地面
+    if (this.physicsManager) {
+      this.physicsManager.recreateGround();
+    }
+
+    // 重新生成边界墙体
+    await this.regenerateBoundaryWalls();
+
+    console.log('✅ 地面和边界墙体重新生成完成');
   }
 
   /**

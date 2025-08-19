@@ -106,45 +106,86 @@ const guiFn = {
     console.log('🔧 物理世界常量:');
     console.log('   📏 地面半尺寸:', `X=${PHYSICS_CONSTANTS.GROUND_SIZE_X}, Z=${PHYSICS_CONSTANTS.GROUND_SIZE_Z}, Y=${PHYSICS_CONSTANTS.GROUND_SIZE_Y}`);
     console.log('   📐 地面完整尺寸:', getGroundFullSize());
-    console.log('   🧱 墙体高度:', PHYSICS_CONSTANTS.WALL_HEIGHT);
     console.log('   🌍 重力:', PHYSICS_CONSTANTS.GRAVITY);
     console.log('   🤝 地面摩擦力:', PHYSICS_CONSTANTS.GROUND_FRICTION);
     console.log('   ⚡ 地面弹性:', PHYSICS_CONSTANTS.GROUND_RESTITUTION);
   },
-  // 创建测试墙体
-  createTestWall: async () => {
-    if (objectManager) {
-      await objectManager.createWallAndDoor('test-wall', {
-        position: { x: 0, y: 0, z: 0 },
-        rotation: { x: 0, y: 0, z: 0 },
-        scale: 1
-      });
-      console.log('✅ 测试墙体创建完成');
-    }
-  },
-  // 移除测试墙体
-  removeTestWall: () => {
-    if (objectManager?.removeObject('test-wall')) {
-      console.log('🗑️ 测试墙体已移除');
-    } else {
-      console.log('❌ 测试墙体不存在');
-    }
-  },
 
+
+}
+
+// 地面尺寸控制对象
+const groundSizeControl = {
+  sizeX: PHYSICS_CONSTANTS.GROUND_SIZE_X,
+  sizeZ: PHYSICS_CONSTANTS.GROUND_SIZE_Z,
+  updateGroundSize: () => {
+    // 更新物理常量
+    (PHYSICS_CONSTANTS as any).GROUND_SIZE_X = groundSizeControl.sizeX;
+    (PHYSICS_CONSTANTS as any).GROUND_SIZE_Z = groundSizeControl.sizeZ;
+
+    // 重新生成地面和边界墙体
+    if (objectManager) {
+      objectManager.regenerateGroundAndWalls().then(() => {
+        // 重新生成后恢复墙体缩放
+        const wall = objectManager.getWall('boundary-walls');
+        if (wall) {
+          wall.wallScale = wallScaleControl.scale;
+          wall.recreateBoundaryWalls();
+          console.log(`✅ 地面更新完成，墙体缩放恢复: ${wallScaleControl.scale}`);
+        }
+      });
+      console.log(`🔄 地面尺寸更新: X=${groundSizeControl.sizeX}, Z=${groundSizeControl.sizeZ}`);
+    }
+  }
 }
 
 // 墙体缩放控制对象
 const wallScaleControl = {
   scale: 5, // 默认缩放值
   updateWallScale: () => {
-    const wall = objectManager?.getWall('test-wall');
+    console.log('🔧 尝试更新墙体缩放...');
+    const wall = objectManager?.getWall('boundary-walls');
+    console.log('🔍 获取到的墙体对象:', wall);
     if (wall) {
       wall.wallScale = wallScaleControl.scale;
       wall.recreateBoundaryWalls();
-      console.log(`🔧 墙体缩放已更新为: ${wallScaleControl.scale}`);
+      console.log(`✅ 墙体缩放已更新为: ${wallScaleControl.scale}`);
     } else {
-      console.log('❌ 测试墙体不存在');
+      console.log('❌ 边界墙体不存在，可能已被清除');
+      // 尝试重新生成墙体
+      if (objectManager) {
+        objectManager.regenerateBoundaryWalls().then(() => {
+          const newWall = objectManager.getWall('boundary-walls');
+          if (newWall) {
+            newWall.wallScale = wallScaleControl.scale;
+            newWall.recreateBoundaryWalls();
+            console.log(`✅ 重新生成后墙体缩放已更新为: ${wallScaleControl.scale}`);
+          }
+        });
+      }
     }
+  }
+}
+
+// 物理体可视化控制对象
+const physicsVisualizationControl = {
+  showPhysicsWalls: true,
+  togglePhysicsVisualization: () => {
+    // 查找所有物理墙体可视化对象
+    const physicsVisualizations: THREE.Object3D[] = [];
+    scene.traverse((child) => {
+      if (child.name.includes('PhysicsWallVisualization')) {
+        physicsVisualizations.push(child);
+        console.log(`🔍 找到物理体可视化: ${child.name}, 位置(${child.position.x.toFixed(1)}, ${child.position.y.toFixed(1)}, ${child.position.z.toFixed(1)}), 可见性: ${child.visible}`);
+      }
+    });
+
+    // 切换可见性
+    physicsVisualizations.forEach(obj => {
+      obj.visible = physicsVisualizationControl.showPhysicsWalls;
+    });
+
+    console.log(`🔍 物理墙体可视化: ${physicsVisualizationControl.showPhysicsWalls ? '显示' : '隐藏'} (${physicsVisualizations.length}个对象)`);
   }
 }
 
@@ -164,10 +205,18 @@ objectFolder.add(guiFn, 'resetTrackPosition').name('重置跑道位置')
 objectFolder.add(guiFn, 'showAllObjects').name('显示所有对象')
 objectFolder.add(guiFn, 'showPhysicsConstants').name('显示物理常量')
 
-// 墙体和门控制
-const wallFolder = gui.addFolder('墙体和门控制')
-wallFolder.add(guiFn, 'createTestWall').name('创建测试墙体')
-wallFolder.add(guiFn, 'removeTestWall').name('移除测试墙体')
+// 地面尺寸控制
+const groundSizeFolder = gui.addFolder('地面尺寸控制')
+groundSizeFolder.add(groundSizeControl, 'sizeX', 50, 500, 10)
+  .name('地面X轴半尺寸')
+  .onFinishChange(() => {
+    groundSizeControl.updateGroundSize();
+  })
+groundSizeFolder.add(groundSizeControl, 'sizeZ', 50, 500, 10)
+  .name('地面Z轴半尺寸')
+  .onFinishChange(() => {
+    groundSizeControl.updateGroundSize();
+  })
 
 // 墙体缩放控制
 const wallScaleFolder = gui.addFolder('墙体缩放控制')
@@ -177,6 +226,15 @@ wallScaleFolder.add(wallScaleControl, 'scale', 0.1, 20, 0.1)
     wallScaleControl.updateWallScale();
   })
 wallScaleFolder.add(wallScaleControl, 'updateWallScale').name('手动更新缩放')
+
+// 物理体可视化控制
+const physicsVisualizationFolder = gui.addFolder('物理体可视化')
+physicsVisualizationFolder.add(physicsVisualizationControl, 'showPhysicsWalls')
+  .name('显示物理墙体')
+  .onChange(() => {
+    physicsVisualizationControl.togglePhysicsVisualization();
+  })
+physicsVisualizationFolder.add(physicsVisualizationControl, 'togglePhysicsVisualization').name('切换可视化')
 
 // gridHelper现在由SceneManager管理
 
@@ -220,7 +278,7 @@ onMounted(async () => {
     // testBoxManager.initializeTestObjects();
 
     // 创建对象管理器并创建椭圆跑道
-    objectManager = new ObjectManager(scene, globalState);
+    objectManager = new ObjectManager(scene, globalState, physicsManager);
 
 
     // 创建物理地面

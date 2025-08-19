@@ -23,6 +23,9 @@ export class WallAndDoor extends BaseModel {
     private wallObject: THREE.Object3D | null = null;      // 墙体对象
     private gateObject: THREE.Group | null = null;     // 门对象
 
+    // 物理体数组
+    private physicsBodies: CANNON.Body[] = [];
+
     // 可控制的缩放值
     public wallScale: number = 5;
 
@@ -278,12 +281,145 @@ export class WallAndDoor extends BaseModel {
             }
 
             this.modelGroup.add(wall);
+
+            // 为墙体添加物理体
+            this.createWallPhysicsBody(wall, posX, posZ, rotation, scale);
+
             actualCount++;
 
             console.log(`   🧱 ${sideName}边墙体 ${i + 1}/${wallCount}: 位置(${posX.toFixed(1)}, 0, ${posZ.toFixed(1)})`);
         }
 
         return actualCount;
+    }
+
+    /**
+     * 为墙体创建物理体
+     */
+    private createWallPhysicsBody(wall: THREE.Object3D, posX: number, posZ: number, rotation: number, scale: number): void {
+        if (!this.physicsWorld) {
+            console.log('⚠️ 物理世界未初始化，跳过墙体物理体创建');
+            return;
+        }
+
+        // 获取墙体的实际原始尺寸（未缩放前）
+        const wallBounds = BaseModel.getBoundingBoxSize(this.wallObject!);
+
+        // 考虑缩放的实际尺寸
+        const actualWidth = wallBounds.width * scale;
+        const actualHeight = wallBounds.height * scale;
+        const actualDepth = wallBounds.depth * scale;
+
+        console.log(`   📏 墙体原始尺寸: (${wallBounds.width.toFixed(2)}, ${wallBounds.height.toFixed(2)}, ${wallBounds.depth.toFixed(2)})`);
+        console.log(`   📏 墙体缩放后尺寸: (${actualWidth.toFixed(2)}, ${actualHeight.toFixed(2)}, ${actualDepth.toFixed(2)})`);
+        console.log(`   🔄 墙体旋转角度: ${(rotation * 180 / Math.PI).toFixed(1)}度`);
+
+        // 创建物理体形状（盒子）- CANNON.Box需要半尺寸
+        const wallShape = new CANNON.Box(new CANNON.Vec3(
+            actualWidth / 2,   // 半宽
+            actualHeight / 2,  // 半高
+            actualDepth / 2    // 半深
+        ));
+
+        // 创建物理体
+        const wallBody = new CANNON.Body({
+            mass: 0, // 静态物体
+            material: new CANNON.Material({
+                friction: PHYSICS_CONSTANTS.DEFAULT_FRICTION,
+                restitution: PHYSICS_CONSTANTS.DEFAULT_RESTITUTION
+            })
+        });
+
+        // 添加形状
+        wallBody.addShape(wallShape);
+
+        // 设置位置和旋转
+        wallBody.position.set(posX, actualHeight / 2, posZ); // Y位置设为墙体高度的一半
+
+        // 使用墙体对象的实际旋转
+        wallBody.quaternion.set(
+            wall.quaternion.x,
+            wall.quaternion.y,
+            wall.quaternion.z,
+            wall.quaternion.w
+        );
+
+        console.log(`   🔄 墙体实际旋转: Y=${wall.rotation.y.toFixed(3)} (${(wall.rotation.y * 180 / Math.PI).toFixed(1)}度)`);
+        console.log(`   🔄 物理体四元数: (${wallBody.quaternion.x.toFixed(3)}, ${wallBody.quaternion.y.toFixed(3)}, ${wallBody.quaternion.z.toFixed(3)}, ${wallBody.quaternion.w.toFixed(3)})`);
+
+        // 添加到物理世界
+        this.physicsWorld.addBody(wallBody);
+
+        // 存储物理体引用（用于后续清理）
+        if (!this.physicsBodies) {
+            this.physicsBodies = [];
+        }
+        this.physicsBodies.push(wallBody);
+
+        // 创建物理体可视化
+        this.createPhysicsBodyVisualization(wallBody, actualWidth, actualHeight, actualDepth);
+
+        console.log(`   ⚡ 墙体物理体已创建: 位置(${posX.toFixed(1)}, ${(actualHeight / 2).toFixed(1)}, ${posZ.toFixed(1)}), 尺寸(${actualWidth.toFixed(1)}, ${actualHeight.toFixed(1)}, ${actualDepth.toFixed(1)})`);
+    }
+
+    /**
+     * 创建物理体可视化
+     */
+    private createPhysicsBodyVisualization(physicsBody: CANNON.Body, width: number, height: number, depth: number): void {
+        // 创建盒子几何体来显示物理体
+        const boxGeometry = new THREE.BoxGeometry(width, height, depth);
+
+        // 创建线框材质
+        const wireframeMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            transparent: true,
+            opacity: 0.6,
+            wireframe: true
+        });
+
+        // 创建实心材质
+        const solidMaterial = new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            transparent: true,
+            opacity: 0.2,
+            side: THREE.DoubleSide
+        });
+
+        // 创建线框网格
+        const wireframeMesh = new THREE.Mesh(boxGeometry, wireframeMaterial);
+        wireframeMesh.position.copy(physicsBody.position as any);
+        wireframeMesh.quaternion.copy(physicsBody.quaternion as any);
+        wireframeMesh.name = `PhysicsWallVisualization_Wireframe_${Date.now()}`;
+
+        // 创建实心网格
+        const solidMesh = new THREE.Mesh(boxGeometry.clone(), solidMaterial);
+        solidMesh.position.copy(physicsBody.position as any);
+        solidMesh.quaternion.copy(physicsBody.quaternion as any);
+        solidMesh.name = `PhysicsWallVisualization_Solid_${Date.now()}`;
+
+        // 添加到场景
+        this.modelGroup.add(wireframeMesh);
+        this.modelGroup.add(solidMesh);
+
+        console.log(`   📦 物理墙体可视化已创建: 位置(${physicsBody.position.x.toFixed(1)}, ${physicsBody.position.y.toFixed(1)}, ${physicsBody.position.z.toFixed(1)})`);
+        console.log(`   🔄 可视化旋转: 四元数(${physicsBody.quaternion.x.toFixed(2)}, ${physicsBody.quaternion.y.toFixed(2)}, ${physicsBody.quaternion.z.toFixed(2)}, ${physicsBody.quaternion.w.toFixed(2)})`);
+    }
+
+    /**
+     * 重写dispose方法，清理墙体物理体
+     */
+    dispose(): void {
+        // 清理墙体物理体
+        if (this.physicsWorld && this.physicsBodies.length > 0) {
+            this.physicsBodies.forEach(body => {
+                this.physicsWorld!.removeBody(body);
+            });
+            this.physicsBodies = [];
+            console.log('🗑️ 已清理所有墙体物理体');
+        }
+
+        // 调用父类的dispose方法
+        super.dispose();
     }
 
     /**

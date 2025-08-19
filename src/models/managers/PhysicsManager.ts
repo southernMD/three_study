@@ -98,7 +98,7 @@ export class PhysicsManager {
     this.world.addBody(groundBody);
     
     // 创建地面可视化（盒子形状）
-    const groundGeometry = new THREE.BoxGeometry(PHYSICS_CONSTANTS.GROUND_SIZE_X * 2, 2, PHYSICS_CONSTANTS.GROUND_SIZE_X * 2);
+    const groundGeometry = new THREE.BoxGeometry(PHYSICS_CONSTANTS.GROUND_SIZE_X * 2, 2, PHYSICS_CONSTANTS.GROUND_SIZE_Z * 2);
     const groundMaterial = new THREE.MeshStandardMaterial({
       color: 0x66ccff,
       transparent: true,
@@ -166,6 +166,69 @@ export class PhysicsManager {
    */
   getWorld(): CANNON.World {
     return this.world;
+  }
+
+  /**
+   * 重新创建地面
+   */
+  recreateGround(): void {
+    console.log('🔄 开始重新创建物理地面...');
+    console.log(`📏 新地面尺寸: X=${PHYSICS_CONSTANTS.GROUND_SIZE_X}, Z=${PHYSICS_CONSTANTS.GROUND_SIZE_Z}`);
+
+    // 移除现有的地面
+    this.removeGround();
+
+    // 更新地面尺寸
+    this.GroundX = PHYSICS_CONSTANTS.GROUND_SIZE_X;
+    this.GroundZ = PHYSICS_CONSTANTS.GROUND_SIZE_Z;
+
+    // 重新创建地面
+    this.createGround();
+
+    console.log(`✅ 物理地面重新创建完成: X=${this.GroundX}, Z=${this.GroundZ}`);
+  }
+
+  /**
+   * 移除现有地面
+   */
+  private removeGround(): void {
+    if (!this.world) return;
+
+    // 查找并移除地面物理体和可视化对象
+    const bodiesToRemove: CANNON.Body[] = [];
+    const meshesToRemove: THREE.Object3D[] = [];
+
+    this.physicsBodies.forEach((mesh, body) => {
+      // 检查是否是地面（位置在y=-1且质量为0）
+      if (body.mass === 0 && Math.abs(body.position.y + 1) < 0.1) {
+        bodiesToRemove.push(body);
+        meshesToRemove.push(mesh);
+      }
+    });
+
+    // 移除物理体
+    bodiesToRemove.forEach(body => {
+      this.world.removeBody(body);
+      this.physicsBodies.delete(body);
+    });
+
+    // 移除可视化对象
+    meshesToRemove.forEach(mesh => {
+      this.scene.remove(mesh);
+      // 释放几何体和材质
+      if (mesh instanceof THREE.Mesh) {
+        if (mesh.geometry) mesh.geometry.dispose();
+        if (mesh.material) {
+          if (Array.isArray(mesh.material)) {
+            mesh.material.forEach(mat => mat.dispose());
+          } else {
+            mesh.material.dispose();
+          }
+        }
+      }
+    });
+
+    console.log(`🗑️ 已移除 ${bodiesToRemove.length} 个地面物理体和可视化对象`);
   }
 
   /**
