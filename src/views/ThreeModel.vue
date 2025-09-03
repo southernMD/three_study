@@ -141,7 +141,7 @@ const groundSizeControl = {
 
 // 墙体缩放控制对象
 const wallScaleControl = {
-  scale: 5, // 默认缩放值
+  scale: 14, // 默认缩放值
   updateWallScale: () => {
     console.log('🔧 尝试更新墙体缩放...');
     const wall = objectManager?.getWall('boundary-walls');
@@ -207,12 +207,12 @@ objectFolder.add(guiFn, 'showPhysicsConstants').name('显示物理常量')
 
 // 地面尺寸控制
 const groundSizeFolder = gui.addFolder('地面尺寸控制')
-groundSizeFolder.add(groundSizeControl, 'sizeX', 50, 500, 10)
+groundSizeFolder.add(groundSizeControl, 'sizeX', 50, 5000, 10)
   .name('地面X轴半尺寸')
   .onFinishChange(() => {
     groundSizeControl.updateGroundSize();
   })
-groundSizeFolder.add(groundSizeControl, 'sizeZ', 50, 500, 10)
+groundSizeFolder.add(groundSizeControl, 'sizeZ', 50, 5000, 10)
   .name('地面Z轴半尺寸')
   .onFinishChange(() => {
     groundSizeControl.updateGroundSize();
@@ -220,12 +220,106 @@ groundSizeFolder.add(groundSizeControl, 'sizeZ', 50, 500, 10)
 
 // 墙体缩放控制
 const wallScaleFolder = gui.addFolder('墙体缩放控制')
-wallScaleFolder.add(wallScaleControl, 'scale', 0.1, 20, 0.1)
+wallScaleFolder.add(wallScaleControl, 'scale', 0.1, 50, 0.1)
   .name('墙体缩放')
   .onChange(() => {
     wallScaleControl.updateWallScale();
   })
 wallScaleFolder.add(wallScaleControl, 'updateWallScale').name('手动更新缩放')
+
+// 跑道变换控制
+const trackTransformControl = {
+  positionX: 0,
+  positionZ: 0,
+  rotationY: 0,
+  scale: 8, // 默认值，会在跑道创建后更新
+  updateTrackTransform: () => {
+    const mainTrack = objectManager?.getMainTrack();
+    if (mainTrack) {
+      // 设置位置（只控制XZ，Y保持为0）
+      mainTrack.setPosition(trackTransformControl.positionX, 0, trackTransformControl.positionZ);
+
+      // 设置旋转（只控制Y轴旋转）
+      mainTrack.setRotationDegrees(0, trackTransformControl.rotationY, 0);
+
+      // 设置缩放
+      mainTrack.setUniformScale(trackTransformControl.scale);
+
+      // 更新所有健身器材的物理体和可视化
+      if ('updateAllGymEquipmentPhysicsAndVisualization' in mainTrack) {
+        (mainTrack as any).updateAllGymEquipmentPhysicsAndVisualization();
+      }
+
+      console.log(`跑道变换更新: 位置(${trackTransformControl.positionX}, 0, ${trackTransformControl.positionZ}), 旋转Y: ${trackTransformControl.rotationY}°, 缩放: ${trackTransformControl.scale}`);
+      console.log(`健身器材物理体和可视化已同步更新`);
+    }
+  },
+  resetTrack: () => {
+    // 重置到ObjectManager中设置的初始值
+    const mainTrack = objectManager?.getMainTrack();
+    if (mainTrack) {
+      const position = mainTrack.getPosition();
+      const rotation = mainTrack.getRotationDegrees();
+      const scale = mainTrack.getScale();
+
+      trackTransformControl.positionX = position.x;
+      trackTransformControl.positionZ = position.z;
+      trackTransformControl.rotationY = rotation.y;
+      trackTransformControl.scale = scale.x; // 假设是统一缩放
+
+      // 更新GUI显示
+      trackFolder.controllers.forEach(controller => {
+        controller.updateDisplay();
+      });
+    }
+  },
+  // 从跑道对象同步当前值到GUI
+  syncFromTrack: () => {
+    const mainTrack = objectManager?.getMainTrack();
+    if (mainTrack) {
+      const position = mainTrack.getPosition();
+      const rotation = mainTrack.getRotationDegrees();
+      const scale = mainTrack.getScale();
+
+      trackTransformControl.positionX = position.x;
+      trackTransformControl.positionZ = position.z;
+      trackTransformControl.rotationY = rotation.y;
+      trackTransformControl.scale = scale.x; // 假设是统一缩放
+
+      // 更新GUI显示
+      trackFolder.controllers.forEach(controller => {
+        controller.updateDisplay();
+      });
+
+      console.log(`从跑道同步GUI值: 位置(${position.x}, ${position.z}), 旋转Y: ${rotation.y}°, 缩放: ${scale.x}`);
+    }
+  }
+}
+
+const trackFolder = gui.addFolder('跑道变换控制')
+trackFolder.add(trackTransformControl, 'positionX', -5000, 5000, 1)
+  .name('X轴位置')
+  .onChange(() => {
+    trackTransformControl.updateTrackTransform();
+  })
+trackFolder.add(trackTransformControl, 'positionZ', -5000, 5000, 1)
+  .name('Z轴位置')
+  .onChange(() => {
+    trackTransformControl.updateTrackTransform();
+  })
+trackFolder.add(trackTransformControl, 'rotationY', -180, 180, 1)
+  .name('Y轴旋转(度)')
+  .onChange(() => {
+    trackTransformControl.updateTrackTransform();
+  })
+trackFolder.add(trackTransformControl, 'scale', 0.1, 20, 0.1)
+  .name('整体缩放')
+  .onChange(() => {
+    trackTransformControl.updateTrackTransform();
+  })
+trackFolder.add(trackTransformControl, 'updateTrackTransform').name('手动更新变换')
+trackFolder.add(trackTransformControl, 'syncFromTrack').name('同步GUI值')
+trackFolder.add(trackTransformControl, 'resetTrack').name('重置跑道')
 
 // 物理体可视化控制
 const physicsVisualizationFolder = gui.addFolder('物理体可视化')
@@ -280,6 +374,14 @@ onMounted(async () => {
     // 创建对象管理器并创建椭圆跑道
     objectManager = new ObjectManager(scene, globalState, physicsManager);
 
+    // 等待跑道创建完成后同步GUI值
+    setTimeout(() => {
+      trackTransformControl.syncFromTrack();
+      // 更新GUI显示
+      trackFolder.controllers.forEach(controller => {
+        controller.updateDisplay();
+      });
+    }, 1000); // 给跑道创建一些时间
 
     // 创建物理地面
     physicsManager.createGround();

@@ -3,9 +3,9 @@
  */
 export const PHYSICS_CONSTANTS = {
   // 地面尺寸
-  GROUND_SIZE_X: 200,  // 地面X轴半尺寸 (实际尺寸 = 500 * 2 = 1000)
+  GROUND_SIZE_X: 1100,  // 地面X轴半尺寸 (实际尺寸 = 500 * 2 = 1000)
   GROUND_SIZE_Z: 200,  // 地面Z轴半尺寸 (实际尺寸 = 500 * 2 = 1000)
-  GROUND_SIZE_Y: 1,    // 地面Y轴半尺寸 (厚度)
+  GROUND_SIZE_Y: 1.5,    // 地面Y轴半尺寸 (厚度)
   
   // 墙体相关
   WALL_HEIGHT: 20,     // 边界墙高度

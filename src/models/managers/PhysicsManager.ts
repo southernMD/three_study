@@ -87,7 +87,7 @@ export class PhysicsManager {
     // 添加形状
     groundBody.addShape(groundShape);
     // 设置地面位置（稍微下沉一点）
-    groundBody.position.set(0, -1, 0);
+    groundBody.position.set(0, -1.5, 0);
     
     // 添加碰撞事件监听器
     // groundBody.addEventListener('collide', (event) => {

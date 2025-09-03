@@ -85,7 +85,7 @@ export abstract class Model {
 
   // 创建跟随相机 - 创建一个跟随模型的相机
   createLookCamera(scene: THREE.Scene): THREE.PerspectiveCamera {
-    const camera = new THREE.PerspectiveCamera(45, 1, 10, 200);
+    const camera = new THREE.PerspectiveCamera(45, 1, 10, 6000);
     const cameraHelper = new THREE.CameraHelper(camera);
 
     // 设置相机位置

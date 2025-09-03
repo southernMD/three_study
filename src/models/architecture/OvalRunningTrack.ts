@@ -3,6 +3,8 @@ import * as CANNON from 'cannon-es';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { StaticGeometryGenerator } from 'three-mesh-bvh';
 import { BaseModel, InitialTransform } from './BaseModel';
+import { OnePullUpBar } from '../outdoorGym/OnePullUpBar';
+import { OutdoorGym } from '../outdoorGym/OutdoorGym';
 
 /**
  * 椭圆跑道类 - 创建标准的400米椭圆跑道（胶囊形）
@@ -12,7 +14,7 @@ export class OvalRunningTrack extends BaseModel {
   private loadingManager: THREE.LoadingManager;
   private isTexturesLoaded = false;
 
-  // 修改后的椭圆跑道参数
+  // 椭圆跑道参数
   private straightLength = 84.39; // 直道长度（米）
   private curveRadius = 25; // 弯道半径（米）- 更小的半圆
   private laneWidth = 1.22; // 每条跑道宽度（米）
@@ -35,6 +37,10 @@ export class OvalRunningTrack extends BaseModel {
       displacement: THREE.Texture;
     };
   } | null = null;
+
+  // 健身器材管理
+  private gymEquipments: (OnePullUpBar | OutdoorGym)[] = [];
+  private usedPositions: THREE.Vector3[] = []; // 记录已使用的位置
 
   constructor(scene: THREE.Scene, physicsWorld?: CANNON.World);
   constructor(scene: THREE.Scene, physicsWorld: CANNON.World | undefined, initialTransform: InitialTransform);
@@ -66,6 +72,8 @@ export class OvalRunningTrack extends BaseModel {
     };
   }
 
+
+
   /**
    * 创建椭圆形跑道
    */
@@ -91,8 +99,355 @@ export class OvalRunningTrack extends BaseModel {
     // 5. 添加到场景（模型会立即显示，因为纹理已准备好）
     this.addToScene();
 
+    // 6. 创建可用区域的可视化
+    this.createAvailableAreaVisualization();
+
+    // 7. 自动添加健身器材到场地内
+    await this.addDefaultGymEquipments();
+
     console.log('椭圆形跑道创建完成');
   }
+
+  /**
+   * 在固定位置添加健身器材（以跑道内部草坪中心为参考坐标系）
+   * @param equipmentType 器材类型 'pullup' | 'gym'
+   * @param customPosition 自定义位置（可选，默认为草坪中心点）
+   * @param scaleMultiplier 缩放倍数（可选，默认为1）
+   * @param flipAngle y轴方向的旋转角度
+   * @returns 创建的健身器材实例
+   */
+  async addGymEquipment(
+    equipmentType: 'pullup' | 'gym',
+    customPosition?: THREE.Vector3,
+    scaleMultiplier: number = 1,
+    flipAngle: number = 0
+  ): Promise<OnePullUpBar | OutdoorGym> {
+    console.log(`开始添加健身器材: ${equipmentType}，缩放倍数: ${scaleMultiplier}`);
+
+    // 使用跑道内部草坪中心作为默认位置（相对于跑道坐标系）
+    const position = customPosition || new THREE.Vector3(0, 0.02, 0);
+
+    let equipment: OnePullUpBar | OutdoorGym;
+
+    if (equipmentType === 'pullup') {
+      equipment = new OnePullUpBar(this.scene, this.physicsWorld, {
+        position: position,
+        rotation: { x: 0, y: flipAngle, z: 0 },
+        scale: scaleMultiplier
+      });
+    } else {
+      equipment = new OutdoorGym(this.scene, this.physicsWorld, {
+        position: position,
+        rotation: { x: 0, y: flipAngle, z: 0 },
+        scale: scaleMultiplier
+      });
+    }
+
+    // 创建器材（传入缩放参数）
+    await equipment.create(scaleMultiplier);
+
+    // 将器材添加到 OvalRunningTrack 组内，而不是直接添加到场景
+    this.modelGroup.add(equipment.getModelGroup());
+
+    //创建物理
+    //TODO:需要经过一些延迟才能让物理以原来的缩放生效，原因未知
+    setTimeout(() => {
+      equipment.createModelPhysicsBody();
+    }, 100);
+
+    // 记录器材
+    this.gymEquipments.push(equipment);
+
+    console.log(`健身器材添加完成，位置: (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)}), 旋转: ${flipAngle}°, 缩放: ${scaleMultiplier}`);
+
+    return equipment;
+  }
+  /**
+   * 获取所有健身器材
+   */
+  getGymEquipments(): (OnePullUpBar | OutdoorGym)[] {
+    return [...this.gymEquipments];
+  }
+
+  /**
+   * 获取健身器材数量
+   */
+  getGymEquipmentCount(): number {
+    return this.gymEquipments.length;
+  }
+
+  /**
+   * 设置所有健身器材包围盒的显示状态
+   * @param visible 是否显示包围盒
+   */
+  setGymEquipmentBoundingBoxVisible(visible: boolean): void {
+    this.gymEquipments.forEach(equipment => {
+      equipment.setBoundingBoxVisible(visible);
+    });
+    console.log(`所有健身器材包围盒显示: ${visible ? '开启' : '关闭'}`);
+  }
+
+  /**
+   * 更新所有健身器材的包围盒
+   */
+  updateGymEquipmentBoundingBoxes(): void {
+    this.gymEquipments.forEach(equipment => {
+      equipment.updateBoundingBox();
+    });
+    console.log('所有健身器材包围盒已更新');
+  }
+
+  /**
+   * 清除所有健身器材
+   */
+  clearAllGymEquipments(): void {
+    this.gymEquipments.forEach(equipment => {
+      // 从模型组中移除
+      this.modelGroup.remove(equipment.getModelGroup());
+      // 销毁器材
+      equipment.dispose();
+    });
+    this.gymEquipments = [];
+    console.log('所有健身器材已清除');
+  }
+
+  /**
+   * 设置健身器材物理体可视化的显示状态
+   * @param visible 是否显示物理体包围盒
+   */
+  setGymEquipmentPhysicsVisualizationVisible(visible: boolean): void {
+    this.gymEquipments.forEach(equipment => {
+      if ('setPhysicsVisualizationVisible' in equipment) {
+        (equipment as any).setPhysicsVisualizationVisible(visible);
+      }
+    });
+    console.log(`健身器材物理体包围盒可视化: ${visible ? '显示' : '隐藏'}`);
+  }
+
+  /**
+   * 更新所有健身器材的物理体和可视化（当跑道变化时调用）
+   */
+  updateAllGymEquipmentPhysicsAndVisualization(): void {
+    console.log('🔄 开始更新所有健身器材的物理体和可视化...');
+
+    this.gymEquipments.forEach((equipment, index) => {
+      if ('updatePhysicsAndVisualization' in equipment) {
+        console.log(`   更新器材 ${index + 1}...`);
+        (equipment as any).updatePhysicsAndVisualization();
+      }
+    });
+
+    console.log(`✅ 所有健身器材物理体和可视化更新完成，共更新 ${this.gymEquipments.length} 个器材`);
+  }
+
+  /**
+   * 显示健身器材物理体调试信息
+   */
+  debugGymEquipmentPhysics(): void {
+    console.log('=== 健身器材物理体调试信息 ===');
+
+    this.gymEquipments.forEach((equipment, index) => {
+      const type = equipment instanceof OnePullUpBar ? '单杠' : '健身器材组合';
+      const physicsBody = (equipment as any).physicsBody;
+
+      console.log(`器材${index + 1}: ${type}`);
+
+      if (physicsBody) {
+        console.log(`  物理体位置: (${physicsBody.position.x.toFixed(2)}, ${physicsBody.position.y.toFixed(2)}, ${physicsBody.position.z.toFixed(2)})`);
+        console.log(`  物理体质量: ${physicsBody.mass}`);
+        console.log(`  物理体形状数量: ${physicsBody.shapes.length}`);
+
+        if (physicsBody.shapes.length > 0) {
+          const shape = physicsBody.shapes[0];
+          if (shape instanceof CANNON.Box) {
+            console.log(`  物理体尺寸: ${(shape.halfExtents.x * 2).toFixed(2)} x ${(shape.halfExtents.y * 2).toFixed(2)} x ${(shape.halfExtents.z * 2).toFixed(2)}`);
+          }
+        }
+      } else {
+        console.log(`  ❌ 物理体未创建`);
+      }
+
+      const modelPos = equipment.getPosition();
+      console.log(`  模型位置: (${modelPos.x.toFixed(2)}, ${modelPos.y.toFixed(2)}, ${modelPos.z.toFixed(2)})`);
+    });
+  }
+
+
+
+  /**
+   * 自动添加默认的健身器材到跑道两边固定位置
+   */
+  private async addDefaultGymEquipments(): Promise<void> {
+    console.log('=== 开始在跑道两边添加健身器材 ===');
+
+    // 获取跑道的包围盒尺寸和缩放
+    const trackSize = this.getBoundingBoxSize();
+    const trackScale = this.getScale();
+    console.log('跑道尺寸:', trackSize);
+    console.log('跑道缩放:', trackScale);
+
+    // 计算原始长度的一半，然后除以缩放倍数得到在跑道坐标系中的实际距离
+    const originalHalfLength = trackSize.width / 2;
+    const scaledHalfLength = originalHalfLength / trackScale.x; // 考虑跑道的X轴缩放
+    console.log(`原始长度的一半: ${originalHalfLength.toFixed(2)}m`);
+    console.log(`缩放后在跑道坐标系中的距离: ${scaledHalfLength.toFixed(2)}m`);
+
+    try {
+      // gym 放到跑道的一边（正X方向，距离中心点缩放后长度一半的位置）
+      const gymPosition = new THREE.Vector3(-scaledHalfLength + 10, 0.02, 0);
+      console.log(`1. 添加健身器材组合到跑道右边（固定缩放5倍），位置: (${gymPosition.x.toFixed(2)}, ${gymPosition.y}, ${gymPosition.z})...`);
+      await this.addGymEquipment('gym', gymPosition, 25);
+
+      // pullup 放到跑道的另一边（负X方向，距离中心点缩放后长度一半的位置）
+      const pullupPosition = new THREE.Vector3(scaledHalfLength, 0.02, 0);
+      const pullupWidthZ = pullupPosition.z + 9
+      const pullupWidthX = pullupPosition.x - 9
+      const xMove = 10
+      console.log(`2. 添加单杠到跑道左边（固定缩放3倍），位置: (${pullupPosition.x.toFixed(2)}, ${pullupPosition.y}, ${pullupPosition.z})...`);
+      await this.addGymEquipment('pullup', pullupPosition.clone().setX(pullupPosition.x - xMove), 9);
+      await this.addGymEquipment('pullup', pullupPosition.clone().setX(pullupPosition.x - xMove), 9, 90);
+      await this.addGymEquipment('pullup', pullupPosition.clone().setX(pullupPosition.x - xMove).setZ(pullupWidthZ), 9 , 90);
+      await this.addGymEquipment('pullup', pullupPosition.clone().setX(pullupPosition.x - xMove).setZ(pullupWidthZ * 2), 9 , 90);
+      await this.addGymEquipment('pullup', pullupPosition.clone().setX(pullupWidthX - xMove), 9);
+      await this.addGymEquipment('pullup', pullupPosition.clone().setX(pullupWidthX - xMove).setZ(pullupWidthZ * 3), 9);
+      await this.addGymEquipment('pullup', pullupPosition.clone().setX(pullupWidthX + 9 - xMove).setZ(pullupWidthZ * 3), 9);
+
+      console.log(`✅ 所有健身器材已添加到跑道两边固定位置`);
+      console.log(`✅ 总计添加 ${this.gymEquipments.length} 个器材`);
+
+      // 详细打印器材信息
+      // console.log('=== 器材详细信息 ===');
+      // this.gymEquipments.forEach((equipment, index) => {
+      //   const type = equipment instanceof OnePullUpBar ? '单杠' : '健身器材组合';
+      //   const pos = equipment.getPosition();
+      //   const rot = equipment.getRotation();
+      //   const scale = equipment.getScale();
+      //   console.log(`器材${index + 1}: ${type}`);
+      //   console.log(`  位置: (${pos.x.toFixed(3)}, ${pos.y.toFixed(3)}, ${pos.z.toFixed(3)})`);
+      //   console.log(`  旋转: Y轴 ${(rot.y * 180 / Math.PI).toFixed(1)}°`);
+      //   console.log(`  缩放: ${scale.x.toFixed(2)}倍`);
+      //   console.log(`  距离中心: ${Math.sqrt(pos.x ** 2 + pos.z ** 2).toFixed(2)}m`);
+      // });
+
+    } catch (error) {
+      console.error('❌ 添加健身器材失败:', error);
+    }
+  }
+
+  /**
+   * 创建跑道中心点标记
+   * 显示健身器材的参考坐标系中心
+   */
+  private createAvailableAreaVisualization(): void {
+    console.log('创建跑道中心点标记...');
+
+    // 创建中心点标记
+    this.createCenterPointMarker();
+
+    // 创建坐标轴辅助线
+    this.createCoordinateAxes();
+
+    console.log('跑道中心点标记创建完成');
+  }
+
+  /**
+   * 创建中心点标记（标记跑道内部草坪中心）
+   */
+  private createCenterPointMarker(): void {
+    // 跑道内部草坪中心就是相对于跑道坐标系的 (0, 0, 0)
+    // 因为草坪是在跑道坐标系中心创建的
+
+    // 创建一个红色球体标记草坪中心点
+    const markerGeometry = new THREE.SphereGeometry(1, 16, 16);
+    const markerMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+    const centerMarker = new THREE.Mesh(markerGeometry, markerMaterial);
+    // 标记位置在跑道坐标系的中心上方1米
+    centerMarker.position.set(0, 1, 0);
+    centerMarker.name = 'TrackCenterMarker';
+    this.modelGroup.add(centerMarker);
+
+    console.log('草坪中心点标记创建完成: (0, 1, 0) - 相对于跑道坐标系');
+  }
+
+  /**
+   * 创建坐标轴辅助线（以跑道内部草坪中心为原点）
+   */
+  private createCoordinateAxes(): void {
+    const axisLength = 20;
+    const axisHeight = 0.5;
+
+    // X轴（红色）- 相对于跑道坐标系
+    const xAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-axisLength, axisHeight, 0),
+      new THREE.Vector3(axisLength, axisHeight, 0)
+    ]);
+    const xAxisMaterial = new THREE.LineBasicMaterial({ color: 0xff0000 });
+    const xAxis = new THREE.Line(xAxisGeometry, xAxisMaterial);
+    xAxis.name = 'XAxis';
+    this.modelGroup.add(xAxis);
+
+    // Z轴（蓝色）- 相对于跑道坐标系
+    const zAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(0, axisHeight, -axisLength),
+      new THREE.Vector3(0, axisHeight, axisLength)
+    ]);
+    const zAxisMaterial = new THREE.LineBasicMaterial({ color: 0x0000ff });
+    const zAxis = new THREE.Line(zAxisGeometry, zAxisMaterial);
+    zAxis.name = 'ZAxis';
+    this.modelGroup.add(zAxis);
+
+    console.log('坐标轴辅助线创建完成，原点: (0, 0) - 相对于跑道坐标系');
+  }
+
+
+
+
+
+  /**
+   * 设置中心点标记的显示状态
+   * @param visible 是否显示中心点标记
+   */
+  setCenterMarkerVisible(visible: boolean): void {
+    const centerMarker = this.modelGroup.getObjectByName('TrackCenterMarker');
+    const xAxis = this.modelGroup.getObjectByName('XAxis');
+    const zAxis = this.modelGroup.getObjectByName('ZAxis');
+
+    if (centerMarker) centerMarker.visible = visible;
+    if (xAxis) xAxis.visible = visible;
+    if (zAxis) zAxis.visible = visible;
+
+    console.log(`中心点标记: ${visible ? '显示' : '隐藏'}`);
+  }
+
+  /**
+   * 更新可用区域可视化（当跑道参数改变时）
+   */
+  updateAvailableAreaVisualization(): void {
+    // 移除旧的可视化对象
+    const oldAreaObjects = this.modelGroup.children.filter(child =>
+      child.name.includes('AvailableArea') || child.name.includes('AreaMarker')
+    );
+
+    oldAreaObjects.forEach(obj => {
+      this.modelGroup.remove(obj);
+      if (obj instanceof THREE.Mesh) {
+        obj.geometry.dispose();
+        if (Array.isArray(obj.material)) {
+          obj.material.forEach(mat => mat.dispose());
+        } else {
+          obj.material.dispose();
+        }
+      }
+    });
+
+    // 重新创建可视化
+    this.createAvailableAreaVisualization();
+
+    console.log('可用区域可视化已更新');
+  }
+
+
 
   /**
    * 预加载所有纹理
@@ -502,7 +857,7 @@ export class OvalRunningTrack extends BaseModel {
       const innerRadius = this.curveRadius + (lane - 1) * this.laneWidth;
       const outerRadius = this.curveRadius + lane * this.laneWidth;
       
-      // 上直道 - 向右延伸
+      // 上直道 - 向左延伸
       const extensionLength = this.curveRadius * 2; // 延伸长度为半径的2倍，更长的延伸
       const extendedStraightLength = this.straightLength + extensionLength;
       const topStraightGeometry = new THREE.PlaneGeometry(extendedStraightLength, this.laneWidth, 100, 10);
@@ -521,7 +876,7 @@ export class OvalRunningTrack extends BaseModel {
 
       const topStraight = new THREE.Mesh(topStraightGeometry, topTrackMaterial);
       topStraight.rotation.x = -Math.PI / 2;
-      topStraight.position.set(extensionLength / 2, 0.02, innerRadius + this.laneWidth / 2); // 向右延伸
+      topStraight.position.set(-extensionLength / 2, 0.02, innerRadius + this.laneWidth / 2); // 向左延伸
 
       // 添加第二组UV坐标
       topStraight.geometry.setAttribute(
@@ -531,7 +886,7 @@ export class OvalRunningTrack extends BaseModel {
 
       this.modelGroup.add(topStraight);
 
-      // 下直道 - 向左延伸（方向相反）
+      // 下直道 - 向右延伸（方向相反）
       const bottomTrackMaterial = trackMaterial.clone();
 
       // 设置所有纹理的重复
@@ -543,7 +898,7 @@ export class OvalRunningTrack extends BaseModel {
 
       const bottomStraight = new THREE.Mesh(topStraightGeometry, bottomTrackMaterial);
       bottomStraight.rotation.x = -Math.PI / 2;
-      bottomStraight.position.set(-extensionLength / 2, 0.02, -(innerRadius + this.laneWidth / 2)); // 向左延伸
+      bottomStraight.position.set(extensionLength / 2, 0.02, -(innerRadius + this.laneWidth / 2)); // 向右延伸
 
       // 添加第二组UV坐标
       bottomStraight.geometry.setAttribute(
@@ -606,6 +961,9 @@ export class OvalRunningTrack extends BaseModel {
 
     // 填充半圆弯道中心的空白区域
     this.fillCurveCenter(trackMaterial);
+
+    // 创建跑道底部平面
+    this.createTrackBase(trackMaterial);
   }
 
   /**
@@ -662,6 +1020,63 @@ export class OvalRunningTrack extends BaseModel {
   }
 
   /**
+   * 创建跑道底部平面
+   */
+  private createTrackBase(trackMaterial: THREE.MeshStandardMaterial): void {
+    // 计算跑道的最大尺寸
+    const extensionLength = this.curveRadius * 2; // 延伸长度
+    const extendedStraightLength = this.straightLength + extensionLength;
+    const trackOuterRadius = this.curveRadius + this.numberOfLanes * this.laneWidth;
+
+    // 跑道的基础尺寸
+    const trackWidth = extendedStraightLength + (this.curveRadius * 2);
+    const trackHeight = trackOuterRadius * 2;
+
+    // 底部平面：长边（宽度）比跑道大20%，短边（高度）保持原尺寸
+    const maxWidth = trackWidth * 1.2;
+    const maxHeight = trackHeight; // 高度保持不变
+
+    console.log(`跑道基础尺寸: 宽度=${trackWidth.toFixed(2)}m, 高度=${trackHeight.toFixed(2)}m`);
+    console.log(`底部平面尺寸: 宽度=${maxWidth.toFixed(2)}m (长边+20%), 高度=${maxHeight.toFixed(2)}m (短边不变)`);
+
+    // 创建底部平面几何体
+    const baseGeometry = new THREE.PlaneGeometry(maxWidth, maxHeight, 50, 50);
+
+    // 创建底部平面材质（使用与跑道相同的材质）
+    const baseMaterial = trackMaterial.clone();
+
+    // 设置纹理重复以适应大平面
+    const repeatX = maxWidth / 10; // 每10米重复一次纹理
+    const repeatY = maxHeight / 10;
+
+    // 设置所有纹理的重复
+    if (baseMaterial.map) baseMaterial.map.repeat.set(repeatX, repeatY);
+    if (baseMaterial.normalMap) baseMaterial.normalMap.repeat.set(repeatX, repeatY);
+    if (baseMaterial.roughnessMap) baseMaterial.roughnessMap.repeat.set(repeatX, repeatY);
+    if (baseMaterial.aoMap) baseMaterial.aoMap.repeat.set(repeatX, repeatY);
+    if (baseMaterial.displacementMap) {
+      baseMaterial.displacementMap.repeat.set(repeatX, repeatY);
+      baseMaterial.displacementScale = 0.01; // 减小位移效果，避免底部过于凹凸
+    }
+
+    // 创建底部平面网格
+    const basePlane = new THREE.Mesh(baseGeometry, baseMaterial);
+    basePlane.rotation.x = -Math.PI / 2; // 水平放置
+    basePlane.position.set(0, -0.01, 0); // 稍微低于跑道表面
+    basePlane.name = 'TrackBase';
+
+    // 添加第二组UV坐标
+    basePlane.geometry.setAttribute(
+      'uv2',
+      new THREE.BufferAttribute(basePlane.geometry.attributes.uv.array, 2)
+    );
+
+    this.modelGroup.add(basePlane);
+
+    console.log('跑道底部平面创建完成');
+  }
+
+  /**
    * 创建跑道线条
    */
   private createTrackLines(): void {
@@ -673,17 +1088,17 @@ export class OvalRunningTrack extends BaseModel {
     for (let i = 1; i < this.numberOfLanes; i++) {
       const radius = this.curveRadius + i * this.laneWidth;
 
-      // 上直线 - 向右延伸
+      // 上直线 - 向左延伸
       const topLineGeometry = new THREE.PlaneGeometry(extendedStraightLength, 0.1);
       const topLine = new THREE.Mesh(topLineGeometry, lineMaterial);
       topLine.rotation.x = -Math.PI / 2;
-      topLine.position.set(extensionLength / 2, 0.03, radius); // 向右延伸
+      topLine.position.set(-extensionLength / 2, 0.03, radius); // 向左延伸
       this.modelGroup.add(topLine);
 
-      // 下直线 - 向左延伸
+      // 下直线 - 向右延伸
       const bottomLine = new THREE.Mesh(topLineGeometry, lineMaterial);
       bottomLine.rotation.x = -Math.PI / 2;
-      bottomLine.position.set(-extensionLength / 2, 0.03, -radius); // 向左延伸
+      bottomLine.position.set(extensionLength / 2, 0.03, -radius); // 向右延伸
       this.modelGroup.add(bottomLine);
 
       // 左弯道线
@@ -789,9 +1204,12 @@ export class OvalRunningTrack extends BaseModel {
   }
 
   /**
-   * 重写 dispose 方法以清理所有物理体
+   * 重写 dispose 方法以清理所有物理体和健身器材
    */
   dispose(): void {
+    // 先清理所有健身器材
+    this.clearAllGymEquipments();
+
     // 清理所有物理体
     if (this.physicsWorld && this.physicsBodies.length > 0) {
       this.physicsBodies.forEach(body => {
@@ -802,6 +1220,8 @@ export class OvalRunningTrack extends BaseModel {
 
     // 调用父类的 dispose 方法
     super.dispose();
+
+    console.log('椭圆跑道及所有健身器材已销毁');
   }
 
   /**

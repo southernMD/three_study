@@ -23,9 +23,9 @@ export class ObjectManager {
     this.physicsManager = physicsManager;
 
     this.createOvalTrack('main-track', {
-      position: { x: 0, y: 0, z: 0 },
+      position: { x: 0, y: 0, z: 100 },
       rotation: { x: 0, y: 0, z: 0 },
-      scale: 2
+      scale: 8 // 支持x、z轴独立缩放
     });
 
     // 直接创建边界墙体
@@ -128,20 +128,19 @@ export class ObjectManager {
     options: {
       position?: { x: number; y: number; z: number };
       rotation?: { x: number; y: number; z: number };
-      scale?: number;
+      scale?: number | { x: number; y: number; z: number };
     } = {}
   ): Promise<OvalRunningTrack> {
     console.log(`🏃 创建椭圆跑道: ${id}`);
 
     // 设置默认参数
-    const config = {
+
+    // 创建跑道实例
+    const track = new OvalRunningTrack(this.scene, this.physicsWorld, {
       position: options.position || { x: 0, y: 0, z: 0 },
       rotation: options.rotation || { x: 0, y: 0, z: 0 },
       scale: options.scale || 2
-    };
-
-    // 创建跑道实例
-    const track = new OvalRunningTrack(this.scene, this.physicsWorld, config);
+    });
 
     // 创建跑道
     await track.create();
@@ -174,7 +173,7 @@ export class ObjectManager {
     };
 
     // 创建墙体实例
-    const wall = new WallAndDoor(this.scene, this.physicsWorld, config);
+    const wall = new WallAndDoor(this.scene, 14 ,this.physicsWorld, config);
 
     // 创建墙体
     await wall.create();

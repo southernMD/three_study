@@ -27,20 +27,22 @@ export class WallAndDoor extends BaseModel {
     private physicsBodies: CANNON.Body[] = [];
 
     // 可控制的缩放值
-    public wallScale: number = 5;
+    public wallScale:number
 
-    constructor(scene: THREE.Scene, physicsWorld?: CANNON.World);
-    constructor(scene: THREE.Scene, physicsWorld: CANNON.World | undefined, initialTransform: InitialTransform);
-    constructor(scene: THREE.Scene, initialTransform: InitialTransform);
+    constructor(scene: THREE.Scene, wallScale:number,physicsWorld?: CANNON.World);
+    constructor(scene: THREE.Scene, wallScale:number,physicsWorld: CANNON.World | undefined, initialTransform: InitialTransform);
+    constructor(scene: THREE.Scene, wallScale:number,initialTransform: InitialTransform);
 
     constructor(
         scene: THREE.Scene,
+        wallScale:number = 1,
         physicsWorldOrTransform?: CANNON.World | InitialTransform,
-        initialTransform?: InitialTransform
+        initialTransform?: InitialTransform,
     ) {
         super(scene,physicsWorldOrTransform as any, initialTransform as InitialTransform);
         // 对象将在加载时初始化
         this.gateObject = new THREE.Group();
+        this.wallScale = wallScale;
     }
 
     async load(): Promise<void> {
