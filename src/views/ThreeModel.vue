@@ -79,8 +79,144 @@ const guiFn = {
   showPhysicsInfo: () => {
     if (physicsManager) {
       physicsManager.showPhysicsInfo();
+      physicsManager.checkCollisionDetection();
     }
   },
+  // 检查碰撞检测状态
+  checkCollisionStatus: () => {
+    console.log('🔍 开始检查碰撞检测状态...');
+
+    // 检查人物物理体
+    const model = mmdModelManager?.getModel();
+    if (model) {
+      const modelValid = model.validatePhysicsBodyInWorld();
+      const modelInfo = model.getPhysicsBodyInfo();
+      console.log('👤 人物物理体状态:', modelValid ? '✅ 正常' : '❌ 异常');
+      console.log('👤 人物物理体信息:', modelInfo);
+    }
+
+    // 检查建筑物理体
+    const schoolBuilding = objectManager?.getObject('school-building');
+    if (schoolBuilding && 'validatePhysicsBodyInWorld' in schoolBuilding) {
+      const buildingValid = (schoolBuilding as any).validatePhysicsBodyInWorld();
+      const buildingInfo = (schoolBuilding as any).getPhysicsBodyInfo();
+      console.log('🏫 建筑物理体状态:', buildingValid ? '✅ 正常' : '❌ 异常');
+      console.log('🏫 建筑物理体信息:', buildingInfo);
+
+      // 检查BVH状态
+      if ('checkBVHStatus' in schoolBuilding) {
+        (schoolBuilding as any).checkBVHStatus();
+      }
+
+      // 验证物理体位置
+      if ('validatePhysicsBodyPosition' in schoolBuilding) {
+        (schoolBuilding as any).validatePhysicsBodyPosition();
+      }
+    }
+
+    // 检查物理世界总体状态
+    if (physicsManager) {
+      physicsManager.checkCollisionDetection();
+    }
+  },
+  // 检查BVH状态
+  checkBVHStatus: () => {
+    console.log('🔍 检查BVH状态...');
+    const schoolBuilding = objectManager?.getObject('school-building');
+    if (schoolBuilding && 'checkBVHStatus' in schoolBuilding) {
+      (schoolBuilding as any).checkBVHStatus();
+    } else {
+      console.log('❌ 学校建筑对象未找到或不支持BVH检查');
+    }
+  },
+  // 测试物理碰撞
+  testPhysicsCollision: () => {
+    console.log('🧪 测试物理碰撞...');
+    const schoolBuilding = objectManager?.getObject('school-building');
+    const model = mmdModelManager?.getModel();
+
+    if (schoolBuilding && model && 'testPhysicsCollision' in schoolBuilding) {
+      // 获取人物当前位置
+      const playerPos = model.mesh.position;
+      console.log(`👤 人物当前位置: (${playerPos.x.toFixed(1)}, ${playerPos.y.toFixed(1)}, ${playerPos.z.toFixed(1)})`);
+
+      // 测试人物前方的位置
+      const testPos = new THREE.Vector3(
+        playerPos.x + Math.sin(model.mesh.rotation.y) * 10,
+        playerPos.y + 5,
+        playerPos.z + Math.cos(model.mesh.rotation.y) * 10
+      );
+
+      (schoolBuilding as any).testPhysicsCollision(testPos);
+    } else {
+      console.log('❌ 无法进行碰撞测试');
+    }
+  },
+  // 检查物理同步
+  checkPhysicsSync: () => {
+    console.log('🔍 检查物理同步...');
+    const model = mmdModelManager?.getModel();
+    if (model && 'checkPhysicsSync' in model) {
+      (model as any).checkPhysicsSync();
+    } else {
+      console.log('❌ 人物模型未找到或不支持物理同步检查');
+    }
+  },
+  // 强制使用简单物理体
+  forceSimplePhysics: () => {
+    console.log('🔧 强制使用简单Box物理体...');
+    const schoolBuilding = objectManager?.getObject('school-building');
+    if (schoolBuilding && 'forceCreateSimplePhysicsBody' in schoolBuilding) {
+      (schoolBuilding as any).forceCreateSimplePhysicsBody();
+      console.log('✅ 已强制创建简单Box物理体');
+    } else {
+      console.log('❌ 学校建筑对象未找到');
+    }
+  },
+  // 检查距离和位置
+  checkDistanceAndPosition: () => {
+    console.log('📏 检查人物和建筑物的距离和位置...');
+
+    const model = mmdModelManager?.getModel();
+    const schoolBuilding = objectManager?.getObject('school-building');
+
+    if (!model || !schoolBuilding) {
+      console.log('❌ 人物或建筑物未找到');
+      return;
+    }
+
+    const playerPos = model.mesh.position;
+    console.log(`👤 人物位置: (${playerPos.x.toFixed(1)}, ${playerPos.y.toFixed(1)}, ${playerPos.z.toFixed(1)})`);
+
+    // 获取建筑物边界框
+    if ('buildingObject' in schoolBuilding && schoolBuilding.buildingObject) {
+      const buildingObj = (schoolBuilding as any).buildingObject;
+      const bbox = new THREE.Box3().setFromObject(buildingObj);
+
+      console.log(`🏢 建筑物边界框:`);
+      console.log(`   min: (${bbox.min.x.toFixed(1)}, ${bbox.min.y.toFixed(1)}, ${bbox.min.z.toFixed(1)})`);
+      console.log(`   max: (${bbox.max.x.toFixed(1)}, ${bbox.max.y.toFixed(1)}, ${bbox.max.z.toFixed(1)})`);
+
+      // 计算人物到建筑物的距离
+      const center = bbox.getCenter(new THREE.Vector3());
+      const distance = playerPos.distanceTo(center);
+      console.log(`📏 人物到建筑物中心距离: ${distance.toFixed(1)}`);
+
+      // 检查人物是否在建筑物边界框内
+      const isInside = bbox.containsPoint(playerPos);
+      console.log(`📍 人物是否在建筑物内: ${isInside ? '是' : '否'}`);
+
+      // 检查物理体信息
+      if ('physicsBodies' in schoolBuilding) {
+        const bodies = (schoolBuilding as any).physicsBodies;
+        console.log(`🔸 建筑物物理体数量: ${bodies.length}`);
+        bodies.forEach((body: any, index: number) => {
+          console.log(`   物理体 ${index}: 位置(${body.position.x.toFixed(1)}, ${body.position.y.toFixed(1)}, ${body.position.z.toFixed(1)})`);
+        });
+      }
+    }
+  },
+
   // 显示跑道信息
   showTrackInfo: () => {
     const mainTrack = objectManager?.getMainTrack();
@@ -170,6 +306,10 @@ const wallScaleControl = {
 // 物理体可视化控制对象
 const physicsVisualizationControl = {
   showPhysicsWalls: true,
+  showSchoolBuildingPhysics: true,
+  showSchoolBuildingBVH: false,
+  showSchoolBuildingCollider: false,
+  schoolBuildingBVHDepth: 10,
   togglePhysicsVisualization: () => {
     // 查找所有物理墙体可视化对象
     const physicsVisualizations: THREE.Object3D[] = [];
@@ -186,6 +326,43 @@ const physicsVisualizationControl = {
     });
 
     console.log(`🔍 物理墙体可视化: ${physicsVisualizationControl.showPhysicsWalls ? '显示' : '隐藏'} (${physicsVisualizations.length}个对象)`);
+  },
+  toggleSchoolBuildingPhysics: () => {
+    const schoolBuilding = objectManager?.getMainSchoolBuilding();
+    if (schoolBuilding && 'setPhysicsVisualizationVisible' in schoolBuilding) {
+      (schoolBuilding as any).setPhysicsVisualizationVisible(physicsVisualizationControl.showSchoolBuildingPhysics);
+    }
+  },
+  toggleSchoolBuildingBVH: () => {
+    const schoolBuilding = objectManager?.getMainSchoolBuilding();
+    if (schoolBuilding && 'setBVHVisualizationVisible' in schoolBuilding) {
+      (schoolBuilding as any).setBVHVisualizationVisible(physicsVisualizationControl.showSchoolBuildingBVH);
+    }
+  },
+  toggleSchoolBuildingCollider: () => {
+    const schoolBuilding = objectManager?.getMainSchoolBuilding();
+    if (schoolBuilding && 'setColliderVisible' in schoolBuilding) {
+      (schoolBuilding as any).setColliderVisible(physicsVisualizationControl.showSchoolBuildingCollider);
+    }
+  },
+  updateSchoolBuildingBVHDepth: () => {
+    const schoolBuilding = objectManager?.getMainSchoolBuilding();
+    if (schoolBuilding && 'setBVHVisualizeDepth' in schoolBuilding) {
+      (schoolBuilding as any).setBVHVisualizeDepth(physicsVisualizationControl.schoolBuildingBVHDepth);
+    }
+  },
+  checkColliderInfo: () => {
+    const schoolBuilding = objectManager?.getMainSchoolBuilding();
+    if (schoolBuilding && 'hasValidCollider' in schoolBuilding && 'getBoundsTree' in schoolBuilding) {
+      const hasCollider = (schoolBuilding as any).hasValidCollider();
+      const boundsTree = (schoolBuilding as any).getBoundsTree();
+      console.log('🔍 学校建筑碰撞体信息:');
+      console.log(`   有效碰撞体: ${hasCollider ? '是' : '否'}`);
+      if (boundsTree) {
+        console.log(`   BVH节点数: ${boundsTree.geometry?.attributes?.position?.count / 3 || 0}`);
+        console.log(`   BVH深度: ${boundsTree._maxDepth || '未知'}`);
+      }
+    }
   }
 }
 
@@ -197,6 +374,12 @@ gui.add(guiFn, 'forceStand').name('播放站立动画')
 gui.add(guiFn, 'createBoxHere').name('在当前位置创建箱子')
 gui.add(guiFn, 'createFallingBoxesNow').name('创建掉落的盒子')
 gui.add(guiFn, 'showPhysicsInfo').name('显示物理信息')
+gui.add(guiFn, 'checkCollisionStatus').name('检查碰撞状态')
+gui.add(guiFn, 'checkBVHStatus').name('检查BVH状态')
+gui.add(guiFn, 'testPhysicsCollision').name('测试物理碰撞')
+gui.add(guiFn, 'checkPhysicsSync').name('检查物理同步')
+gui.add(guiFn, 'forceSimplePhysics').name('强制简单物理体')
+gui.add(guiFn, 'checkDistanceAndPosition').name('检查距离位置')
 
 // 对象管理器控制
 const objectFolder = gui.addFolder('静态对象管理')
@@ -328,6 +511,30 @@ physicsVisualizationFolder.add(physicsVisualizationControl, 'showPhysicsWalls')
   .onChange(() => {
     physicsVisualizationControl.togglePhysicsVisualization();
   })
+
+// 学校建筑可视化子文件夹
+const schoolBuildingFolder = physicsVisualizationFolder.addFolder('学校建筑')
+schoolBuildingFolder.add(physicsVisualizationControl, 'showSchoolBuildingPhysics')
+  .name('显示物理体线框')
+  .onChange(() => {
+    physicsVisualizationControl.toggleSchoolBuildingPhysics();
+  })
+schoolBuildingFolder.add(physicsVisualizationControl, 'showSchoolBuildingBVH')
+  .name('显示BVH辅助线')
+  .onChange(() => {
+    physicsVisualizationControl.toggleSchoolBuildingBVH();
+  })
+schoolBuildingFolder.add(physicsVisualizationControl, 'showSchoolBuildingCollider')
+  .name('显示碰撞体线框')
+  .onChange(() => {
+    physicsVisualizationControl.toggleSchoolBuildingCollider();
+  })
+schoolBuildingFolder.add(physicsVisualizationControl, 'schoolBuildingBVHDepth', 1, 20, 1)
+  .name('BVH可视化深度')
+  .onChange(() => {
+    physicsVisualizationControl.updateSchoolBuildingBVHDepth();
+  })
+
 physicsVisualizationFolder.add(physicsVisualizationControl, 'togglePhysicsVisualization').name('切换可视化')
 
 // gridHelper现在由SceneManager管理

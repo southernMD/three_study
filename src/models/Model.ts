@@ -244,22 +244,22 @@ export abstract class Model {
       this.mixer.update(delta);
     }
 
-    // 更新位置
-    if (this.isWalking) {
-      const speed = 100; // 移动速度
-
-      if (this.keys.ArrowUp) this.move('forward', speed, delta);
-      if (this.keys.ArrowDown)this.move('backward', speed, delta);
-      if (this.keys.ArrowLeft)this.move('left', speed, delta);
-      if (this.keys.ArrowRight) this.move('right', speed, delta);
-    }
-    
-    // 如果存在物理世界，处理用户输入到物理身体的同步
-    if (this.globalState.physicsWorld) {
-      // 处理用户输入到物理身体的同步（仅在移动时）
+    // 如果存在物理世界，使用物理引擎控制移动
+    if (this.globalState.physicsWorld && this.playerBody) {
+      // 处理用户输入到物理身体的同步
       this.handlePhysicsCollision();
 
       // 注意：物理引擎计算和结果同步现在在ThreeModel.vue中控制时机
+    } else {
+      // 回退到直接位置控制（没有物理世界时）
+      if (this.isWalking) {
+        const speed = 100; // 移动速度
+
+        if (this.keys.ArrowUp) this.move('forward', speed, delta);
+        if (this.keys.ArrowDown)this.move('backward', speed, delta);
+        if (this.keys.ArrowLeft)this.move('left', speed, delta);
+        if (this.keys.ArrowRight) this.move('right', speed, delta);
+      }
     }
 
     // 无论是否在行走，都更新相机位置，确保在重力下落时相机也会跟随
@@ -458,8 +458,8 @@ export abstract class Model {
       fixedRotation: true, // 防止身体旋转
       linearDamping: 0.9, // 线性阻尼，减少滑动
       material: new CANNON.Material({
-        friction: 0.5,
-        restitution: 0.3
+        friction: 0.5, // 与SchoolBuilding保持一致的摩擦力
+        restitution: 0.3 // 与SchoolBuilding保持一致的弹性系数
       })
     });
     
@@ -549,15 +549,47 @@ export abstract class Model {
     const dimensions = this.getModelDimensions();
     const height = dimensions.height;
 
-    // 只在用户输入时同步模型位置到物理身体（用于移动控制）
+    // 重要修复：只在移动时将输入同步到物理身体
+    // 其他时候让物理引擎控制位置
+
     if (this.isWalking) {
-      // 同步模型位置到物理身体的XZ平面
+      // 移动时：将当前位置作为物理体的目标位置
       this.playerBody.position.x = this.mesh.position.x;
       this.playerBody.position.z = this.mesh.position.z;
-
-      // 计算物理胶囊体中心点相对于模型底部的偏移
-      // 胶囊体中心应该在模型中心高度位置
       this.playerBody.position.y = this.mesh.position.y + height / 2;
+    }
+    // 不移动时：让物理引擎完全控制位置（重力、碰撞等）
+
+    // 如果在移动，给物理体一些速度，这样碰撞检测更有效
+    if (this.isWalking) {
+      // 计算移动方向和速度
+      const speed = 100;
+      const velocity = new CANNON.Vec3(0, 0, 0);
+
+      if (this.keys.ArrowUp) {
+        velocity.x += Math.sin(this.mesh.rotation.y) * speed;
+        velocity.z += Math.cos(this.mesh.rotation.y) * speed;
+      }
+      if (this.keys.ArrowDown) {
+        velocity.x -= Math.sin(this.mesh.rotation.y) * speed;
+        velocity.z -= Math.cos(this.mesh.rotation.y) * speed;
+      }
+      if (this.keys.ArrowLeft) {
+        velocity.x += Math.sin(this.mesh.rotation.y + Math.PI / 2) * speed;
+        velocity.z += Math.cos(this.mesh.rotation.y + Math.PI / 2) * speed;
+      }
+      if (this.keys.ArrowRight) {
+        velocity.x -= Math.sin(this.mesh.rotation.y + Math.PI / 2) * speed;
+        velocity.z -= Math.cos(this.mesh.rotation.y + Math.PI / 2) * speed;
+      }
+
+      // 保持Y轴速度（重力）
+      velocity.y = this.playerBody.velocity.y;
+      this.playerBody.velocity.copy(velocity);
+    } else {
+      // 不移动时，清除XZ速度，保持Y轴速度（重力）
+      this.playerBody.velocity.x = 0;
+      this.playerBody.velocity.z = 0;
     }
 
     // 物理引擎会在每帧计算碰撞，然后通过syncPhysicsToModel同步回模型
@@ -573,11 +605,16 @@ export abstract class Model {
       const dimensions = this.getModelDimensions();
       const height = dimensions.height;
 
-      // 始终同步物理身体的位置到模型
+      // 重要：始终让物理引擎控制模型位置
       // 计算模型底部位置 = 胶囊体中心位置 - 高度/2
-      this.mesh.position.y = this.playerBody.position.y - height / 2;
-      this.mesh.position.x = this.playerBody.position.x;
-      this.mesh.position.z = this.playerBody.position.z;
+      const newY = this.playerBody.position.y - height / 2;
+      const newX = this.playerBody.position.x;
+      const newZ = this.playerBody.position.z;
+
+      // 应用物理引擎计算的位置
+      this.mesh.position.x = newX;
+      this.mesh.position.y = newY;
+      this.mesh.position.z = newZ;
     }
   }
 
@@ -612,6 +649,90 @@ export abstract class Model {
    */
   public hasPhysicsBody(): boolean {
     return this.playerBody !== undefined;
+  }
+
+  /**
+   * 调试：检查物理体和模型位置同步
+   */
+  public checkPhysicsSync(): void {
+    if (!this.playerBody || !this.mesh) {
+      console.log('❌ 物理体或模型不存在');
+      return;
+    }
+
+    const dimensions = this.getModelDimensions();
+    const height = dimensions.height;
+
+    console.log('🔍 物理体和模型位置同步检查:');
+    console.log(`   模型位置: (${this.mesh.position.x.toFixed(2)}, ${this.mesh.position.y.toFixed(2)}, ${this.mesh.position.z.toFixed(2)})`);
+    console.log(`   物理体位置: (${this.playerBody.position.x.toFixed(2)}, ${this.playerBody.position.y.toFixed(2)}, ${this.playerBody.position.z.toFixed(2)})`);
+    console.log(`   物理体速度: (${this.playerBody.velocity.x.toFixed(2)}, ${this.playerBody.velocity.y.toFixed(2)}, ${this.playerBody.velocity.z.toFixed(2)})`);
+    console.log(`   模型高度: ${height.toFixed(2)}`);
+
+    // 计算期望的模型位置
+    const expectedModelY = this.playerBody.position.y - height / 2;
+    console.log(`   期望模型Y位置: ${expectedModelY.toFixed(2)}`);
+
+    // 检查同步误差
+    const errorX = Math.abs(this.mesh.position.x - this.playerBody.position.x);
+    const errorY = Math.abs(this.mesh.position.y - expectedModelY);
+    const errorZ = Math.abs(this.mesh.position.z - this.playerBody.position.z);
+
+    console.log(`   同步误差: X=${errorX.toFixed(3)}, Y=${errorY.toFixed(3)}, Z=${errorZ.toFixed(3)}`);
+
+    if (errorX > 0.1 || errorY > 0.1 || errorZ > 0.1) {
+      console.log('⚠️ 位置同步误差较大');
+    } else {
+      console.log('✅ 位置同步正常');
+    }
+  }
+
+  /**
+   * 获取物理体详细信息（用于调试）
+   */
+  public getPhysicsBodyInfo(): any {
+    if (!this.playerBody) return null;
+
+    return {
+      position: {
+        x: this.playerBody.position.x,
+        y: this.playerBody.position.y,
+        z: this.playerBody.position.z
+      },
+      mass: this.playerBody.mass,
+      type: this.playerBody.type === CANNON.Body.STATIC ? '静态' : '动态',
+      shapes: this.playerBody.shapes.length,
+      material: {
+        friction: this.playerBody.material?.friction || 'N/A',
+        restitution: this.playerBody.material?.restitution || 'N/A'
+      },
+      velocity: {
+        x: this.playerBody.velocity.x,
+        y: this.playerBody.velocity.y,
+        z: this.playerBody.velocity.z
+      }
+    };
+  }
+
+  /**
+   * 验证物理体是否在物理世界中
+   */
+  public validatePhysicsBodyInWorld(): boolean {
+    if (!this.globalState.physicsWorld || !this.playerBody) {
+      console.log('⚠️ 物理世界或人物物理体未初始化');
+      return false;
+    }
+
+    const worldBodies = this.globalState.physicsWorld.bodies;
+    const isInWorld = worldBodies.includes(this.playerBody);
+
+    if (isInWorld) {
+      console.log('✅ 人物物理体已在物理世界中');
+    } else {
+      console.log('❌ 人物物理体不在物理世界中');
+    }
+
+    return isInWorld;
   }
 
   /**

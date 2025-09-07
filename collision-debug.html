@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>物理碰撞调试页面</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+        }
+        .debug-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            padding: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+        .debug-panel h3 {
+            margin-top: 0;
+            color: #333;
+        }
+        .debug-button {
+            display: block;
+            width: 100%;
+            margin: 5px 0;
+            padding: 8px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .debug-button:hover {
+            background: #0056b3;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .instructions {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .instructions h2 {
+            color: #333;
+            margin-top: 0;
+        }
+        .instructions ol {
+            padding-left: 20px;
+        }
+        .instructions li {
+            margin: 8px 0;
+        }
+        .console-output {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="instructions">
+        <h2>🔧 物理碰撞调试指南</h2>
+        <p>这个页面帮助你调试 SchoolBuilding.ts 和 Model.ts 之间的物理碰撞问题。</p>
+        
+        <h3>📋 测试步骤：</h3>
+        <ol>
+            <li>打开浏览器开发者工具的控制台 (F12)</li>
+            <li>访问主应用页面: <a href="/index.html" target="_blank">打开主应用</a></li>
+            <li>等待模型加载完成</li>
+            <li>在控制台中查看物理体创建日志</li>
+            <li>使用右侧调试面板中的按钮进行测试</li>
+            <li>使用 WASD 键移动人物，测试碰撞效果</li>
+        </ol>
+
+        <h3>🔍 预期的控制台输出：</h3>
+        <div class="console-output">
+🏫 SchoolBuilding 构造函数调用完成
+🔍 物理世界状态: ✅ 已传递
+🏫 开始创建学校建筑...
+📁 开始加载学校建筑模型文件...
+✅ 学校建筑模型文件加载成功
+🔍 开始提取学校建筑模型...
+✅ 学校建筑模型加载完成
+🏫 学校建筑模型加载完成，准备创建物理体...
+⏰ 开始创建学校建筑物理体...
+🔧 开始创建学校建筑CANNON精确物理体...
+✅ CANNON物理体已创建并添加到物理世界
+✅ 学校建筑物理体验证成功，可以与人物进行碰撞检测
+✅ 人物物理体验证成功，可以与建筑物进行碰撞检测
+        </div>
+
+        <h3>⚠️ 常见问题：</h3>
+        <ul>
+            <li><strong>物理世界状态: ❌ 未传递</strong> - 检查 ObjectManager 中的物理世界传递</li>
+            <li><strong>建筑对象缺失</strong> - 检查模型文件路径和加载状态</li>
+            <li><strong>物理体验证失败</strong> - 检查物理体创建时序和参数</li>
+            <li><strong>没有碰撞效果</strong> - 检查材质兼容性和物理引擎更新</li>
+        </ul>
+    </div>
+
+    <div class="debug-panel">
+        <h3>🛠️ 调试工具</h3>
+        
+        <button class="debug-button" onclick="checkPhysicsWorld()">
+            检查物理世界状态
+        </button>
+        
+        <button class="debug-button" onclick="checkBuildingPhysics()">
+            检查建筑物理体
+        </button>
+        
+        <button class="debug-button" onclick="checkPlayerPhysics()">
+            检查人物物理体
+        </button>
+        
+        <button class="debug-button" onclick="toggleVisualization()">
+            切换可视化辅助线
+        </button>
+        
+        <button class="debug-button" onclick="testCollision()">
+            测试碰撞检测
+        </button>
+        
+        <div id="status-container">
+            <!-- 状态信息将在这里显示 -->
+        </div>
+    </div>
+
+    <script>
+        function showStatus(message, type = 'info') {
+            const container = document.getElementById('status-container');
+            const statusDiv = document.createElement('div');
+            statusDiv.className = `status ${type}`;
+            statusDiv.textContent = message;
+            container.appendChild(statusDiv);
+            
+            // 5秒后自动移除
+            setTimeout(() => {
+                if (statusDiv.parentNode) {
+                    statusDiv.parentNode.removeChild(statusDiv);
+                }
+            }, 5000);
+        }
+
+        function checkPhysicsWorld() {
+            console.log('🔍 检查物理世界状态...');
+            showStatus('检查物理世界状态 - 查看控制台', 'warning');
+            
+            // 这些函数需要在主应用的上下文中执行
+            if (window.physicsManager) {
+                window.physicsManager.showPhysicsInfo();
+                window.physicsManager.checkCollisionDetection();
+                showStatus('物理世界检查完成', 'success');
+            } else {
+                showStatus('物理管理器未找到 - 请先打开主应用', 'error');
+            }
+        }
+
+        function checkBuildingPhysics() {
+            console.log('🏫 检查建筑物理体...');
+            showStatus('检查建筑物理体 - 查看控制台', 'warning');
+            
+            if (window.objectManager) {
+                const building = window.objectManager.getObject('school-building');
+                if (building && building.validatePhysicsBodyInWorld) {
+                    const isValid = building.validatePhysicsBodyInWorld();
+                    const info = building.getPhysicsBodyInfo();
+                    console.log('🏫 建筑物理体信息:', info);
+                    showStatus(isValid ? '建筑物理体正常' : '建筑物理体异常', isValid ? 'success' : 'error');
+                } else {
+                    showStatus('建筑对象未找到', 'error');
+                }
+            } else {
+                showStatus('对象管理器未找到 - 请先打开主应用', 'error');
+            }
+        }
+
+        function checkPlayerPhysics() {
+            console.log('👤 检查人物物理体...');
+            showStatus('检查人物物理体 - 查看控制台', 'warning');
+            
+            if (window.mmdModelManager) {
+                const model = window.mmdModelManager.getModel();
+                if (model && model.validatePhysicsBodyInWorld) {
+                    const isValid = model.validatePhysicsBodyInWorld();
+                    const info = model.getPhysicsBodyInfo();
+                    console.log('👤 人物物理体信息:', info);
+                    showStatus(isValid ? '人物物理体正常' : '人物物理体异常', isValid ? 'success' : 'error');
+                } else {
+                    showStatus('人物模型未找到', 'error');
+                }
+            } else {
+                showStatus('模型管理器未找到 - 请先打开主应用', 'error');
+            }
+        }
+
+        function toggleVisualization() {
+            console.log('👁️ 切换可视化辅助线...');
+            showStatus('切换可视化辅助线', 'warning');
+            
+            if (window.objectManager) {
+                const building = window.objectManager.getObject('school-building');
+                if (building) {
+                    // 切换各种可视化
+                    if (building.setBVHVisualizationVisible) {
+                        building.setBVHVisualizationVisible(true);
+                    }
+                    if (building.setColliderVisible) {
+                        building.setColliderVisible(true);
+                    }
+                    if (building.setPhysicsVisualizationVisible) {
+                        building.setPhysicsVisualizationVisible(true);
+                    }
+                    showStatus('可视化辅助线已开启', 'success');
+                } else {
+                    showStatus('建筑对象未找到', 'error');
+                }
+            } else {
+                showStatus('对象管理器未找到 - 请先打开主应用', 'error');
+            }
+        }
+
+        function testCollision() {
+            console.log('🎯 测试碰撞检测...');
+            showStatus('测试碰撞检测 - 请使用WASD移动人物', 'warning');
+            
+            // 提示用户如何测试
+            alert('请使用以下方式测试碰撞：\n\n1. 使用 WASD 键移动人物\n2. 尝试让人物接近建筑物\n3. 观察控制台的碰撞事件日志\n4. 检查人物是否能穿透建筑物');
+        }
+
+        // 页面加载时的提示
+        window.addEventListener('load', () => {
+            showStatus('调试页面已加载 - 请先打开主应用', 'warning');
+        });
+    </script>
+</body>
+</html>

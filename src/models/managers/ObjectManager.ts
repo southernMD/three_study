@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { OvalRunningTrack } from '../architecture/OvalRunningTrack';
 import { WallAndDoor } from '../architecture/WallAndDoor';
+import { SchoolBuilding } from '../architecture/SchoolBuilding';
 import { BaseModel } from '../architecture/BaseModel';
 import { GlobalState } from '../../types/GlobalState';
 import { PhysicsManager } from './PhysicsManager';
@@ -26,6 +27,13 @@ export class ObjectManager {
       position: { x: 0, y: 0, z: 100 },
       rotation: { x: 0, y: 0, z: 0 },
       scale: 8 // 支持x、z轴独立缩放
+    });
+
+    // 创建学校建筑
+    this.createSchoolBuilding('school-building', {
+      position: { x: 0, y: 0, z: -200 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: 5
     });
 
     // 直接创建边界墙体
@@ -186,6 +194,71 @@ export class ObjectManager {
   }
 
   /**
+   * 创建学校建筑
+   */
+  async createSchoolBuilding(
+    id: string,
+    options: {
+      position?: { x: number; y: number; z: number };
+      rotation?: { x: number; y: number; z: number };
+      scale?: number;
+    } = {}
+  ): Promise<SchoolBuilding> {
+    console.log(`🏫 开始创建学校建筑: ${id}`);
+    const building = new SchoolBuilding(
+      this.scene,
+      options.scale || 1,
+      this.physicsWorld,
+      {
+        position: options.position || { x: 0, y: 0, z: 0 },
+        rotation: options.rotation || { x: 0, y: 0, z: 0 },
+        scale: options.scale || 1
+      }
+    );
+
+    await building.create();
+
+    // 创建物理体（延迟执行以确保模型完全加载）
+    setTimeout(() => {
+      console.log('⏰ 开始创建学校建筑物理体...');
+
+      // 检查建筑对象是否存在
+      if (!building.buildingObject) {
+        console.log('⚠️ 建筑对象尚未加载，延长等待时间...');
+        setTimeout(() => {
+          building.createWallPhysicsBody();
+          this.validateBuildingPhysics(building);
+        }, 500);
+      } else {
+        building.createWallPhysicsBody();
+        this.validateBuildingPhysics(building);
+      }
+    }, 200);
+
+    this.objects.set(id, building);
+    console.log(`✅ 学校建筑创建完成: ${id}`);
+    return building;
+  }
+
+  private validateBuildingPhysics(building: any): void {
+    // 验证物理体是否正确创建和添加
+    setTimeout(() => {
+      const isValid = building.validatePhysicsBodyInWorld();
+      const bodyInfo = building.getPhysicsBodyInfo();
+
+      console.log('🔍 学校建筑物理体信息:', bodyInfo);
+
+      if (isValid) {
+        console.log('✅ 学校建筑物理体验证成功，可以与人物进行碰撞检测');
+      } else {
+        console.log('❌ 学校建筑物理体验证失败，碰撞检测可能无法正常工作');
+        console.log('🔧 尝试重新创建物理体...');
+        building.createWallPhysicsBody();
+      }
+    }, 100);
+  }
+
+  /**
    * 获取对象
    */
   getObject<T extends BaseModel>(id: string): T | undefined {
@@ -211,6 +284,20 @@ export class ObjectManager {
    */
   getWall(id: string): WallAndDoor | undefined {
     return this.getObject<WallAndDoor>(id);
+  }
+
+  /**
+   * 获取学校建筑
+   */
+  getSchoolBuilding(id: string): SchoolBuilding | undefined {
+    return this.getObject<SchoolBuilding>(id);
+  }
+
+  /**
+   * 获取主学校建筑
+   */
+  getMainSchoolBuilding(): SchoolBuilding | undefined {
+    return this.getSchoolBuilding('school-building');
   }
 
   /**
@@ -240,6 +327,8 @@ export class ObjectManager {
   getAllObjects(): Map<string, BaseModel> {
     return this.objects;
   }
+
+
 
   /**
    * 获取所有跑道（兼容性方法）

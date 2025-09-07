@@ -75,7 +75,21 @@ export class GLTFModel extends Model {
       
       // 创建物理身体
       this.createPhysicsBody();
-      
+
+      // 验证物理体是否正确创建
+      setTimeout(() => {
+        const isValid = this.validatePhysicsBodyInWorld();
+        const bodyInfo = this.getPhysicsBodyInfo();
+
+        console.log('🔍 人物物理体信息:', bodyInfo);
+
+        if (isValid) {
+          console.log('✅ 人物物理体验证成功，可以与建筑物进行碰撞检测');
+        } else {
+          console.log('❌ 人物物理体验证失败，碰撞检测可能无法正常工作');
+        }
+      }, 50);
+
       // 设置辅助视觉效果
       this.setupHelpers(scene, capsuleVisual);
       

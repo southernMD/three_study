@@ -253,20 +253,58 @@ export class PhysicsManager {
    */
   showPhysicsInfo(): void {
     if (this.world) {
-      console.log('物理世界信息：', this.world);
-      console.log('物理对象数量:', this.world.bodies.length);
-      
+      console.log('🌍 物理世界信息：', this.world);
+      console.log('📊 物理对象数量:', this.world.bodies.length);
+
       // 显示所有物理对象的位置
       this.world.bodies.forEach((body: CANNON.Body, index: number) => {
-        console.log(`物理对象 ${index}:`, {
-          位置: body.position,
+        console.log(`🔸 物理对象 ${index}:`, {
+          位置: {
+            x: body.position.x.toFixed(2),
+            y: body.position.y.toFixed(2),
+            z: body.position.z.toFixed(2)
+          },
           质量: body.mass,
           类型: body.type === CANNON.Body.STATIC ? '静态' : '动态',
-          形状数量: body.shapes.length
+          形状数量: body.shapes.length,
+          材质: {
+            摩擦力: body.material?.friction || 'N/A',
+            弹性: body.material?.restitution || 'N/A'
+          }
         });
       });
     } else {
-      console.log('物理世界未初始化！');
+      console.log('❌ 物理世界未初始化！');
+    }
+  }
+
+  /**
+   * 检查碰撞检测配置
+   */
+  checkCollisionDetection(): void {
+    if (!this.world) {
+      console.log('❌ 物理世界未初始化');
+      return;
+    }
+
+    console.log('🔍 碰撞检测配置检查:');
+    console.log('   - 广相检测算法:', this.world.broadphase.constructor.name);
+    console.log('   - 允许休眠:', this.world.allowSleep);
+    console.log('   - 重力:', this.world.gravity);
+    console.log('   - 默认接触材质:', this.world.defaultContactMaterial);
+    console.log('   - 接触材质数量:', this.world.contactmaterials.length);
+
+    // 检查是否有动态和静态物体
+    const staticBodies = this.world.bodies.filter(body => body.type === CANNON.Body.STATIC);
+    const dynamicBodies = this.world.bodies.filter(body => body.type === CANNON.Body.DYNAMIC);
+
+    console.log(`   - 静态物体数量: ${staticBodies.length}`);
+    console.log(`   - 动态物体数量: ${dynamicBodies.length}`);
+
+    if (staticBodies.length > 0 && dynamicBodies.length > 0) {
+      console.log('✅ 物理世界配置正常，应该可以进行碰撞检测');
+    } else {
+      console.log('⚠️ 缺少静态或动态物体，碰撞检测可能无法正常工作');
     }
   }
 

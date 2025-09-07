@@ -306,10 +306,11 @@ export class WallAndDoor extends BaseModel {
 
         // 获取墙体的实际原始尺寸（未缩放前）
         const wallBounds = BaseModel.getBoundingBoxSize(this.wallObject!);
+        
 
         // 考虑缩放的实际尺寸
         const actualWidth = wallBounds.width * scale;
-        const actualHeight = wallBounds.height * scale;
+        const actualHeight = (wallBounds.height + 2) * scale ;
         const actualDepth = wallBounds.depth * scale;
 
         console.log(`   📏 墙体原始尺寸: (${wallBounds.width.toFixed(2)}, ${wallBounds.height.toFixed(2)}, ${wallBounds.depth.toFixed(2)})`);

@@ -213,7 +213,7 @@ export class OnePullUpBar extends BaseModel {
       pillarBody.position.set(
         worldPosition.x - 7 ,
         physicsHeight / 2,
-        worldPosition.z - 5 + originalBounds.depth 
+        worldPosition.z  + originalBounds.depth 
       );
     }
     pillarBody.quaternion.set(
