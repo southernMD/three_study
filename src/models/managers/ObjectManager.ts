@@ -33,7 +33,7 @@ export class ObjectManager {
     this.createSchoolBuilding('school-building', {
       position: { x: 0, y: 0, z: -200 },
       rotation: { x: 0, y: 0, z: 0 },
-      scale: 5
+      scale: 1
     });
 
     // 直接创建边界墙体
@@ -205,58 +205,27 @@ export class ObjectManager {
     } = {}
   ): Promise<SchoolBuilding> {
     console.log(`🏫 开始创建学校建筑: ${id}`);
+
+    // 创建变换参数
+    const transform = {
+      position: options.position || { x: 0, y: 0, z: 0 },
+      rotation: options.rotation || { x: 0, y: 0, z: 0 },
+      scale: options.scale || 1
+    };
+
     const building = new SchoolBuilding(
       this.scene,
-      options.scale || 1,
-      this.physicsWorld,
-      {
-        position: options.position || { x: 0, y: 0, z: 0 },
-        rotation: options.rotation || { x: 0, y: 0, z: 0 },
-        scale: options.scale || 1
-      }
+      transform
     );
 
     await building.create();
-
-    // 创建物理体（延迟执行以确保模型完全加载）
-    setTimeout(() => {
-      console.log('⏰ 开始创建学校建筑物理体...');
-
-      // 检查建筑对象是否存在
-      if (!building.buildingObject) {
-        console.log('⚠️ 建筑对象尚未加载，延长等待时间...');
-        setTimeout(() => {
-          building.createWallPhysicsBody();
-          this.validateBuildingPhysics(building);
-        }, 500);
-      } else {
-        building.createWallPhysicsBody();
-        this.validateBuildingPhysics(building);
-      }
-    }, 200);
 
     this.objects.set(id, building);
     console.log(`✅ 学校建筑创建完成: ${id}`);
     return building;
   }
 
-  private validateBuildingPhysics(building: any): void {
-    // 验证物理体是否正确创建和添加
-    setTimeout(() => {
-      const isValid = building.validatePhysicsBodyInWorld();
-      const bodyInfo = building.getPhysicsBodyInfo();
 
-      console.log('🔍 学校建筑物理体信息:', bodyInfo);
-
-      if (isValid) {
-        console.log('✅ 学校建筑物理体验证成功，可以与人物进行碰撞检测');
-      } else {
-        console.log('❌ 学校建筑物理体验证失败，碰撞检测可能无法正常工作');
-        console.log('🔧 尝试重新创建物理体...');
-        building.createWallPhysicsBody();
-      }
-    }, 100);
-  }
 
   /**
    * 获取对象

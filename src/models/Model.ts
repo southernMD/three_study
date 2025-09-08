@@ -1,7 +1,6 @@
 import * as THREE from 'three';
 import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import { MeshBVH } from 'three-mesh-bvh';
 // 导入cannon-es物理引擎
 import * as CANNON from 'cannon-es';
 import { GlobalState } from '../types/GlobalState';
@@ -45,6 +44,12 @@ export abstract class Model {
   // 物理身体
   private playerBody?: CANNON.Body;
 
+  // BVH 碰撞检测相关
+  private bvhColliders: THREE.Mesh[] = [];
+  private playerIsOnGround = false;
+  private playerVelocity = new THREE.Vector3();
+  private upVector = new THREE.Vector3(0, 1, 0);
+
   // 相机辅助器
   private cameraHelpers?: {
     lookCameraHelper?: THREE.CameraHelper;
@@ -63,6 +68,9 @@ export abstract class Model {
 
   // 全局状态引用
   protected globalState: GlobalState;
+
+  // BVH 碰撞检测开关
+  private bvhCollisionEnabled: boolean = false;
 
   constructor(globalState: GlobalState) {
     this.globalState = globalState;
@@ -195,20 +203,21 @@ export abstract class Model {
 
     const { radius, height, visual } = this.capsuleParams;
 
-    const cylinderHeight = Math.max(0, height);
-    this.playerCapsule.start.set(
-      this.mesh.position.x,
-      this.mesh.position.y + radius, // 将起点抬高半径的距离，防止穿透地面
-      this.mesh.position.z
-    );
+    // 🔧 修复：胶囊体使用本地坐标，不需要更新位置
+    // 因为胶囊体是相对于模型的本地坐标系定义的
+    // 在BVH碰撞检测时会通过矩阵变换转换到世界坐标
+    // 这里保持胶囊体的本地坐标不变
+    this.playerCapsule.start.set(0, radius, 0);
+    this.playerCapsule.end.set(0, height - radius, 0);
 
-    // 胶囊体终点相应上移
-    this.playerCapsule.end.set(
-      this.mesh.position.x,
-      this.mesh.position.y - radius, // 相应调整终点位置
-      this.mesh.position.z
-    );
-
+    // 更新可视化胶囊体的位置（可视化需要世界坐标）
+    if (visual) {
+      visual.position.set(
+        this.mesh.position.x,
+        this.mesh.position.y + height / 2,
+        this.mesh.position.z
+      );
+    }
   }
 
   // 移动模型
@@ -262,6 +271,12 @@ export abstract class Model {
       }
     }
 
+    // BVH碰撞检测专门用于SchoolBuilding，与物理世界并存
+    // 这样可以同时有物理世界的地面/跑道碰撞 + BVH的建筑物碰撞
+    if (this.bvhCollisionEnabled) {
+      this.handleBVHCollision();
+    }
+
     // 无论是否在行走，都更新相机位置，确保在重力下落时相机也会跟随
     // 保存相机当前位置相对于目标点的偏移
     const cameraOffset = new THREE.Vector3().subVectors(
@@ -309,6 +324,14 @@ export abstract class Model {
 
       console.log(`人物辅助线显示状态: ${newVisibility ? '显示' : '隐藏'}`);
     }
+  }
+
+  /**
+   * 切换BVH碰撞检测开关
+   */
+  toggleBVHCollisionEnabled(): void {
+    this.bvhCollisionEnabled = !this.bvhCollisionEnabled;
+    console.log(`🔄 BVH碰撞检测: ${this.bvhCollisionEnabled ? '启用' : '禁用'}`);
   }
 
   // 处理键盘按下事件
@@ -379,19 +402,19 @@ export abstract class Model {
     // 因此我们需要将模型高度减去两个半径(两端的半球)，得到中间圆柱体部分的高度
     const cylinderHeight = Math.max(0, dimensions.height - 2 * radius);
 
-    // 重要调整：将起点抬高到地面上，防止穿透地面
-    // 胶囊体起点应该在模型底部位置 + 半径，这样胶囊体底部刚好与地面接触
+    // 🔧 修复：胶囊体应该使用相对于模型的本地坐标（参考characterMovement.js）
+    // 胶囊体起点在模型本地坐标系的底部
     const start = new THREE.Vector3(
-      this.mesh.position.x,
-      this.mesh.position.y + radius, // 将起点抬高半径的距离，防止穿透地面
-      this.mesh.position.z
+      0, // 本地坐标X
+      radius, // 本地坐标Y：底部 + 半径
+      0  // 本地坐标Z
     );
 
-    // 胶囊体终点相应上移
+    // 胶囊体终点在模型本地坐标系的顶部
     const end = new THREE.Vector3(
-      this.mesh.position.x,
-      this.mesh.position.y - radius, // 相应调整终点位置
-      this.mesh.position.z
+      0, // 本地坐标X
+      dimensions.height - radius, // 本地坐标Y：顶部 - 半径
+      0  // 本地坐标Z
     );
 
     const playerCapsule = new Capsule(start, end, radius);
@@ -763,6 +786,230 @@ export abstract class Model {
           this.mesh.position.z
         );
       }
+    }
+  }
+
+  // ==================== BVH 碰撞检测方法 ====================
+
+  /**
+   * 注册BVH碰撞体（由建筑物等调用）
+   */
+  public registerBVHCollider(collider: THREE.Mesh): void {
+    if (collider && collider.geometry && (collider.geometry as any).boundsTree) {
+      this.bvhColliders.push(collider);
+      console.log(`✅ 注册BVH碰撞体: ${collider.name || 'Unnamed'}`);
+    } else {
+      console.warn('⚠️ 尝试注册无效的BVH碰撞体');
+    }
+  }
+
+  /**
+   * 移除BVH碰撞体
+   */
+  public unregisterBVHCollider(collider: THREE.Mesh): void {
+    const index = this.bvhColliders.indexOf(collider);
+    if (index !== -1) {
+      this.bvhColliders.splice(index, 1);
+      console.log(`✅ 移除BVH碰撞体: ${collider.name || 'Unnamed'}`);
+    }
+  }
+
+  /**
+   * 使用BVH进行碰撞检测（专门用于SchoolBuilding，与物理世界并存）
+   * 完全参考characterMovement.js的实现
+   */
+  private handleBVHCollision(): void {
+    if (!this.mesh || !this.playerCapsule || !this.capsuleParams || this.bvhColliders.length === 0) {
+      return;
+    }
+
+    const { radius } = this.capsuleParams;
+
+    // 临时变量（参考characterMovement.js）
+    const tempBox = new THREE.Box3();
+    const tempSegment = new THREE.Line3();
+    const tempVector = new THREE.Vector3();
+    const tempVector2 = new THREE.Vector3();
+    const tempMat = new THREE.Matrix4();
+    // 遍历所有BVH碰撞体
+    for (const collider of this.bvhColliders) {
+      if (!collider.geometry || !(collider.geometry as any).boundsTree) {
+        continue;
+      }
+
+      // 🔧 距离检查 - 只有当人物接近建筑时才进行BVH碰撞检测
+      const colliderBounds = new THREE.Box3().setFromObject(collider);
+      const playerPosition = this.mesh.position;
+      const closestPoint = colliderBounds.clampPoint(playerPosition, new THREE.Vector3());
+      const distanceToBuilding = playerPosition.distanceTo(closestPoint);
+
+      // 设置检测距离阈值
+      const detectionThreshold = 50;
+
+      if (distanceToBuilding > detectionThreshold) {
+        continue;
+      }
+
+      // � 关键修复：完全按照characterMovement.js的方式处理坐标变换
+      // 1. 更新人物的世界矩阵
+      this.mesh.updateMatrixWorld();
+
+      // 2. 准备碰撞检测变量
+      tempBox.makeEmpty();
+      tempMat.copy(collider.matrixWorld).invert();
+
+      // 3. 复制胶囊体线段（使用当前胶囊体位置）
+      tempSegment.start.copy(this.playerCapsule.start);
+      tempSegment.end.copy(this.playerCapsule.end);
+
+      // 4. 将胶囊体转换到碰撞体的本地空间（关键步骤！）
+      tempSegment.start.applyMatrix4(this.mesh.matrixWorld).applyMatrix4(tempMat);
+      tempSegment.end.applyMatrix4(this.mesh.matrixWorld).applyMatrix4(tempMat);
+
+      // 5. 获取胶囊体的轴对齐边界框
+      tempBox.expandByPoint(tempSegment.start);
+      tempBox.expandByPoint(tempSegment.end);
+      tempBox.min.addScalar(-radius);
+      tempBox.max.addScalar(radius);
+
+      // 6. 使用BVH进行碰撞检测（完全参考characterMovement.js）
+      (collider.geometry as any).boundsTree.shapecast({
+        intersectsBounds: (box: THREE.Box3) => box.intersectsBox(tempBox),
+        intersectsTriangle: (tri: any) => {
+          // 检查三角形是否与胶囊体相交
+          const triPoint = tempVector;
+          const capsulePoint = tempVector2;
+
+          const distance = tri.closestPointToSegment(tempSegment, triPoint, capsulePoint);
+          if (distance < radius) {
+            const depth = radius - distance;
+            const direction = capsulePoint.sub(triPoint).normalize();
+
+            tempSegment.start.addScaledVector(direction, depth);
+            tempSegment.end.addScaledVector(direction, depth);
+          }
+        }
+      });
+
+      // 7. 获取调整后的位置（转换回世界空间）
+      const newPosition = tempVector;
+      newPosition.copy(tempSegment.start).applyMatrix4(collider.matrixWorld);
+
+      // 8. 检查人物需要移动多少
+      const deltaVector = tempVector2;
+      deltaVector.subVectors(newPosition, this.mesh.position);
+
+      // 🔧 调试：记录详细的碰撞信息
+      const beforePos = this.mesh.position.clone();
+
+      // 9. 检查是否主要是垂直调整（地面检测）
+      this.playerIsOnGround = deltaVector.y > Math.abs(0.01 * this.playerVelocity.y * 0.25);
+
+      // 10. 计算偏移量并应用
+      const offset = Math.max(0.0, deltaVector.length() - 1e-5);
+
+      // 🔧 修复：恢复位置修改，但加上更合理的条件判断
+      if (offset > 1e-5) {
+        deltaVector.normalize().multiplyScalar(offset);
+
+        // � 关键修复：限制Y轴方向的异常调整，防止相机异常抬高
+        const maxYAdjustment = 2.0; // 限制Y轴调整的最大幅度
+        if (Math.abs(deltaVector.y) > maxYAdjustment) {
+          console.log(`⚠️ 限制Y轴调整: 原始=${deltaVector.y.toFixed(3)}, 限制到=${Math.sign(deltaVector.y) * maxYAdjustment}`);
+          deltaVector.y = Math.sign(deltaVector.y) * maxYAdjustment;
+        }
+
+        // 🔧 只有当人物真的在建筑附近时才应用位置调整
+        if (distanceToBuilding <= 25) { // 减小距离阈值，只在真正接近建筑时才调整
+          // 11. 应用位置调整
+          this.mesh.position.add(deltaVector);
+
+          // 12. 更新胶囊体位置
+          this.updateCapsulePosition();
+
+          // 详细调试日志
+          const afterPos = this.mesh.position.clone();
+          const actualChange = beforePos.distanceTo(afterPos);
+          console.log(`🔄 BVH碰撞检测应用:`);
+          console.log(`   距建筑: ${distanceToBuilding.toFixed(1)}`);
+          console.log(`   计算偏移: ${offset.toFixed(3)}`);
+          console.log(`   实际移动: ${actualChange.toFixed(3)}`);
+          console.log(`   位置变化: (${(afterPos.x - beforePos.x).toFixed(3)}, ${(afterPos.y - beforePos.y).toFixed(3)}, ${(afterPos.z - beforePos.z).toFixed(3)})`);
+        } else {
+          console.log(`⚠️ BVH碰撞被忽略(距离太远): offset=${offset.toFixed(3)}, 距建筑=${distanceToBuilding.toFixed(1)}`);
+        }
+
+        // 13. 调整速度（参考characterMovement.js）
+        if (!this.playerIsOnGround) {
+          deltaVector.normalize();
+          this.playerVelocity.addScaledVector(deltaVector, -deltaVector.dot(this.playerVelocity));
+        } else {
+          this.playerVelocity.set(0, 0, 0);
+        }
+      }
+    }
+  }
+
+  /**
+   * 获取所有注册的BVH碰撞体
+   */
+  public getBVHColliders(): THREE.Mesh[] {
+    return [...this.bvhColliders];
+  }
+
+  /**
+   * 获取BVH碰撞状态信息
+   */
+  public getBVHCollisionStatus(): {
+    isOnGround: boolean;
+    velocity: THREE.Vector3;
+    colliderCount: number;
+    position: THREE.Vector3;
+    distanceToBuilding?: number;
+    bvhEnabled: boolean;
+  } {
+    let distanceToBuilding: number | undefined;
+
+    // 计算到最近建筑的距离
+    if (this.mesh && this.bvhColliders.length > 0) {
+      let minDistance = Infinity;
+      for (const collider of this.bvhColliders) {
+        const colliderBounds = new THREE.Box3().setFromObject(collider);
+        const closestPoint = colliderBounds.clampPoint(this.mesh.position, new THREE.Vector3());
+        const distance = this.mesh.position.distanceTo(closestPoint);
+        minDistance = Math.min(minDistance, distance);
+      }
+      distanceToBuilding = minDistance === Infinity ? undefined : minDistance;
+    }
+
+    return {
+      isOnGround: this.playerIsOnGround,
+      velocity: this.playerVelocity.clone(),
+      colliderCount: this.bvhColliders.length,
+      position: this.mesh ? this.mesh.position.clone() : new THREE.Vector3(),
+      distanceToBuilding,
+      bvhEnabled: this.bvhCollisionEnabled
+    };
+  }
+
+  /**
+   * 调试方法：检查BVH碰撞检测状态
+   */
+  public debugBVHCollision(): void {
+    console.log('🔍 BVH碰撞检测调试信息:');
+    const status = this.getBVHCollisionStatus();
+    console.log(`   BVH启用状态: ${status.bvhEnabled ? '启用' : '禁用'}`);
+    console.log(`   注册的碰撞体数量: ${status.colliderCount}`);
+    console.log(`   人物位置: (${status.position.x.toFixed(1)}, ${status.position.y.toFixed(1)}, ${status.position.z.toFixed(1)})`);
+    console.log(`   到建筑距离: ${status.distanceToBuilding ? status.distanceToBuilding.toFixed(1) : 'N/A'}`);
+    console.log(`   在地面: ${status.isOnGround ? '是' : '否'}`);
+    console.log(`   速度: (${status.velocity.x.toFixed(2)}, ${status.velocity.y.toFixed(2)}, ${status.velocity.z.toFixed(2)})`);
+
+    // 检查胶囊体状态
+    if (this.playerCapsule && this.capsuleParams) {
+      console.log(`   胶囊体半径: ${this.capsuleParams.radius.toFixed(2)}`);
+      console.log(`   胶囊体起点: (${this.playerCapsule.start.x.toFixed(1)}, ${this.playerCapsule.start.y.toFixed(1)}, ${this.playerCapsule.start.z.toFixed(1)})`);
+      console.log(`   胶囊体终点: (${this.playerCapsule.end.x.toFixed(1)}, ${this.playerCapsule.end.y.toFixed(1)}, ${this.playerCapsule.end.z.toFixed(1)})`);
     }
   }
 }

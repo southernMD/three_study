@@ -95,61 +95,11 @@ const guiFn = {
       console.log('👤 人物物理体信息:', modelInfo);
     }
 
-    // 检查建筑物理体
-    const schoolBuilding = objectManager?.getObject('school-building');
-    if (schoolBuilding && 'validatePhysicsBodyInWorld' in schoolBuilding) {
-      const buildingValid = (schoolBuilding as any).validatePhysicsBodyInWorld();
-      const buildingInfo = (schoolBuilding as any).getPhysicsBodyInfo();
-      console.log('🏫 建筑物理体状态:', buildingValid ? '✅ 正常' : '❌ 异常');
-      console.log('🏫 建筑物理体信息:', buildingInfo);
-
-      // 检查BVH状态
-      if ('checkBVHStatus' in schoolBuilding) {
-        (schoolBuilding as any).checkBVHStatus();
-      }
-
-      // 验证物理体位置
-      if ('validatePhysicsBodyPosition' in schoolBuilding) {
-        (schoolBuilding as any).validatePhysicsBodyPosition();
-      }
-    }
+    // 建筑物理体检查已移除
 
     // 检查物理世界总体状态
     if (physicsManager) {
       physicsManager.checkCollisionDetection();
-    }
-  },
-  // 检查BVH状态
-  checkBVHStatus: () => {
-    console.log('🔍 检查BVH状态...');
-    const schoolBuilding = objectManager?.getObject('school-building');
-    if (schoolBuilding && 'checkBVHStatus' in schoolBuilding) {
-      (schoolBuilding as any).checkBVHStatus();
-    } else {
-      console.log('❌ 学校建筑对象未找到或不支持BVH检查');
-    }
-  },
-  // 测试物理碰撞
-  testPhysicsCollision: () => {
-    console.log('🧪 测试物理碰撞...');
-    const schoolBuilding = objectManager?.getObject('school-building');
-    const model = mmdModelManager?.getModel();
-
-    if (schoolBuilding && model && 'testPhysicsCollision' in schoolBuilding) {
-      // 获取人物当前位置
-      const playerPos = model.mesh.position;
-      console.log(`👤 人物当前位置: (${playerPos.x.toFixed(1)}, ${playerPos.y.toFixed(1)}, ${playerPos.z.toFixed(1)})`);
-
-      // 测试人物前方的位置
-      const testPos = new THREE.Vector3(
-        playerPos.x + Math.sin(model.mesh.rotation.y) * 10,
-        playerPos.y + 5,
-        playerPos.z + Math.cos(model.mesh.rotation.y) * 10
-      );
-
-      (schoolBuilding as any).testPhysicsCollision(testPos);
-    } else {
-      console.log('❌ 无法进行碰撞测试');
     }
   },
   // 检查物理同步
@@ -162,60 +112,8 @@ const guiFn = {
       console.log('❌ 人物模型未找到或不支持物理同步检查');
     }
   },
-  // 强制使用简单物理体
-  forceSimplePhysics: () => {
-    console.log('🔧 强制使用简单Box物理体...');
-    const schoolBuilding = objectManager?.getObject('school-building');
-    if (schoolBuilding && 'forceCreateSimplePhysicsBody' in schoolBuilding) {
-      (schoolBuilding as any).forceCreateSimplePhysicsBody();
-      console.log('✅ 已强制创建简单Box物理体');
-    } else {
-      console.log('❌ 学校建筑对象未找到');
-    }
-  },
-  // 检查距离和位置
-  checkDistanceAndPosition: () => {
-    console.log('📏 检查人物和建筑物的距离和位置...');
 
-    const model = mmdModelManager?.getModel();
-    const schoolBuilding = objectManager?.getObject('school-building');
 
-    if (!model || !schoolBuilding) {
-      console.log('❌ 人物或建筑物未找到');
-      return;
-    }
-
-    const playerPos = model.mesh.position;
-    console.log(`👤 人物位置: (${playerPos.x.toFixed(1)}, ${playerPos.y.toFixed(1)}, ${playerPos.z.toFixed(1)})`);
-
-    // 获取建筑物边界框
-    if ('buildingObject' in schoolBuilding && schoolBuilding.buildingObject) {
-      const buildingObj = (schoolBuilding as any).buildingObject;
-      const bbox = new THREE.Box3().setFromObject(buildingObj);
-
-      console.log(`🏢 建筑物边界框:`);
-      console.log(`   min: (${bbox.min.x.toFixed(1)}, ${bbox.min.y.toFixed(1)}, ${bbox.min.z.toFixed(1)})`);
-      console.log(`   max: (${bbox.max.x.toFixed(1)}, ${bbox.max.y.toFixed(1)}, ${bbox.max.z.toFixed(1)})`);
-
-      // 计算人物到建筑物的距离
-      const center = bbox.getCenter(new THREE.Vector3());
-      const distance = playerPos.distanceTo(center);
-      console.log(`📏 人物到建筑物中心距离: ${distance.toFixed(1)}`);
-
-      // 检查人物是否在建筑物边界框内
-      const isInside = bbox.containsPoint(playerPos);
-      console.log(`📍 人物是否在建筑物内: ${isInside ? '是' : '否'}`);
-
-      // 检查物理体信息
-      if ('physicsBodies' in schoolBuilding) {
-        const bodies = (schoolBuilding as any).physicsBodies;
-        console.log(`🔸 建筑物物理体数量: ${bodies.length}`);
-        bodies.forEach((body: any, index: number) => {
-          console.log(`   物理体 ${index}: 位置(${body.position.x.toFixed(1)}, ${body.position.y.toFixed(1)}, ${body.position.z.toFixed(1)})`);
-        });
-      }
-    }
-  },
 
   // 显示跑道信息
   showTrackInfo: () => {
@@ -245,6 +143,269 @@ const guiFn = {
     console.log('   🌍 重力:', PHYSICS_CONSTANTS.GRAVITY);
     console.log('   🤝 地面摩擦力:', PHYSICS_CONSTANTS.GROUND_FRICTION);
     console.log('   ⚡ 地面弹性:', PHYSICS_CONSTANTS.GROUND_RESTITUTION);
+  },
+
+  // 测试BVH碰撞检测修复
+  testBVHFix: () => {
+    console.log('🔧 测试BVH碰撞检测修复...');
+    const model = mmdModelManager?.getModel();
+
+    if (!model || !model.mesh) {
+      console.log('❌ 人物模型未找到');
+      return;
+    }
+
+    // 记录当前位置和相机位置
+    const currentPos = model.mesh.position.clone();
+    const lookCamera = mmdModelManager?.getLookCamera();
+    const currentCameraPos = lookCamera ? lookCamera.position.clone() : null;
+
+    console.log(`📍 测试前人物位置: (${currentPos.x.toFixed(1)}, ${currentPos.y.toFixed(1)}, ${currentPos.z.toFixed(1)})`);
+    if (currentCameraPos) {
+      console.log(`📷 测试前相机位置: (${currentCameraPos.x.toFixed(1)}, ${currentCameraPos.y.toFixed(1)}, ${currentCameraPos.z.toFixed(1)})`);
+    }
+
+    // 启用BVH碰撞检测
+    if ('toggleBVHCollisionEnabled' in model) {
+      (model as any).toggleBVHCollisionEnabled();
+    }
+
+    // 等待几帧，然后检查位置变化
+    setTimeout(() => {
+      const newPos = model.mesh.position.clone();
+      const newCameraPos = lookCamera ? lookCamera.position.clone() : null;
+
+      console.log(`📍 测试后人物位置: (${newPos.x.toFixed(1)}, ${newPos.y.toFixed(1)}, ${newPos.z.toFixed(1)})`);
+      if (newCameraPos) {
+        console.log(`📷 测试后相机位置: (${newCameraPos.x.toFixed(1)}, ${newCameraPos.y.toFixed(1)}, ${newCameraPos.z.toFixed(1)})`);
+      }
+
+      // 计算位置变化
+      const posChange = currentPos.distanceTo(newPos);
+      const cameraChange = currentCameraPos && newCameraPos ? currentCameraPos.distanceTo(newCameraPos) : 0;
+
+      console.log(`📏 人物位置变化: ${posChange.toFixed(3)}`);
+      console.log(`📏 相机位置变化: ${cameraChange.toFixed(3)}`);
+
+      // 检查是否有异常的位置变化
+      if (posChange > 0.1) {
+        console.log('⚠️ 人物位置发生了异常变化！');
+      } else {
+        console.log('✅ 人物位置保持稳定');
+      }
+
+      if (cameraChange > 0.1) {
+        console.log('⚠️ 相机位置发生了异常变化！');
+      } else {
+        console.log('✅ 相机位置保持稳定');
+      }
+
+      // 获取BVH状态
+      if ('getBVHCollisionStatus' in model) {
+        const status = (model as any).getBVHCollisionStatus();
+        console.log(`🔍 BVH状态: 启用=${status.bvhEnabled}, 距建筑=${status.distanceToBuilding ? status.distanceToBuilding.toFixed(1) : 'N/A'}`);
+      }
+    }, 100);
+  },
+
+  // 测试BVH碰撞检测状态
+  testBVHCollision: () => {
+    console.log('🧪 测试BVH碰撞检测状态...');
+    const model = mmdModelManager?.getModel();
+    const schoolBuilding = objectManager?.getMainSchoolBuilding();
+
+    if (!model || !schoolBuilding) {
+      console.log('❌ 模型或建筑物未找到');
+      return;
+    }
+
+    // 获取BVH碰撞状态
+    if ('getBVHCollisionStatus' in model) {
+      const status = (model as any).getBVHCollisionStatus();
+      console.log('🔍 BVH碰撞状态:');
+      console.log(`   BVH启用: ${status.bvhEnabled ? '是' : '否'}`);
+      console.log(`   在地面: ${status.isOnGround ? '是' : '否'}`);
+      console.log(`   速度: (${status.velocity.x.toFixed(2)}, ${status.velocity.y.toFixed(2)}, ${status.velocity.z.toFixed(2)})`);
+      console.log(`   注册的碰撞体数量: ${status.colliderCount}`);
+      console.log(`   人物位置: (${status.position.x.toFixed(1)}, ${status.position.y.toFixed(1)}, ${status.position.z.toFixed(1)})`);
+      console.log(`   到建筑距离: ${status.distanceToBuilding ? status.distanceToBuilding.toFixed(1) : 'N/A'}`);
+    }
+
+    // 检查建筑物BVH状态
+    const collider = schoolBuilding.getCollider();
+    if (collider) {
+      console.log('🏢 建筑物BVH信息:');
+      console.log(`   碰撞体名称: ${collider.name}`);
+      console.log(`   顶点数: ${collider.geometry.attributes.position.count}`);
+      console.log(`   BVH树存在: ${(collider.geometry as any).boundsTree ? '是' : '否'}`);
+      console.log(`   可见性: ${collider.visible ? '可见' : '隐藏'}`);
+
+      // 检查建筑物边界框
+      const bbox = new THREE.Box3().setFromObject(collider);
+      console.log(`   建筑边界框:`);
+      console.log(`     min: (${bbox.min.x.toFixed(1)}, ${bbox.min.y.toFixed(1)}, ${bbox.min.z.toFixed(1)})`);
+      console.log(`     max: (${bbox.max.x.toFixed(1)}, ${bbox.max.y.toFixed(1)}, ${bbox.max.z.toFixed(1)})`);
+    } else {
+      console.log('❌ 建筑物BVH碰撞体未创建');
+    }
+  },
+
+  // 测试BVH碰撞检测范围
+  testBVHRange: () => {
+    console.log('🎯 测试BVH碰撞检测范围...');
+    const model = mmdModelManager?.getModel();
+
+    if (!model || !model.mesh) {
+      console.log('❌ 人物模型未找到');
+      return;
+    }
+
+    // 记录当前位置
+    const currentPos = model.mesh.position.clone();
+    console.log(`📍 当前位置: (${currentPos.x.toFixed(1)}, ${currentPos.y.toFixed(1)}, ${currentPos.z.toFixed(1)})`);
+
+    // 测试不同位置的BVH状态
+    const testPositions = [
+      { name: '原点', pos: new THREE.Vector3(0, 0, 0) },
+      { name: '远离建筑', pos: new THREE.Vector3(100, 0, 100) },
+      { name: '接近建筑', pos: new THREE.Vector3(0, 0, 50) },
+      { name: '建筑内部', pos: new THREE.Vector3(0, 0, 0) }
+    ];
+
+    testPositions.forEach(test => {
+      // 临时移动人物到测试位置
+      model.mesh.position.copy(test.pos);
+
+      // 获取BVH状态
+      if ('getBVHCollisionStatus' in model) {
+        const status = (model as any).getBVHCollisionStatus();
+        console.log(`🔍 ${test.name} (${test.pos.x}, ${test.pos.y}, ${test.pos.z}):`);
+        console.log(`   到建筑距离: ${status.distanceToBuilding ? status.distanceToBuilding.toFixed(1) : 'N/A'}`);
+        console.log(`   是否在检测范围内: ${status.distanceToBuilding && status.distanceToBuilding <= 15 ? '是' : '否'}`);
+      }
+    });
+
+    // 恢复原始位置
+    model.mesh.position.copy(currentPos);
+    console.log('📍 已恢复到原始位置');
+  },
+
+  // 测试碰撞事件
+  testCollisionEvent: () => {
+    console.log('🎯 测试碰撞事件...');
+    const model = mmdModelManager?.getModel();
+
+    if (!model || !model.mesh) {
+      console.log('❌ 人物模型未找到');
+      return;
+    }
+
+    // 记录移动前的位置
+    const beforePos = model.mesh.position.clone();
+    console.log(`📍 移动前位置: (${beforePos.x.toFixed(1)}, ${beforePos.y.toFixed(1)}, ${beforePos.z.toFixed(1)})`);
+
+    // 尝试向前移动一小步
+    const moveDirection = new THREE.Vector3(0, 0, 1);
+    model.mesh.position.add(moveDirection);
+
+    // 手动触发BVH碰撞检测
+    if ('handleBVHCollision' in model) {
+      (model as any).handleBVHCollision();
+    }
+
+    // 检查移动后的位置
+    const afterPos = model.mesh.position.clone();
+    console.log(`📍 移动后位置: (${afterPos.x.toFixed(1)}, ${afterPos.y.toFixed(1)}, ${afterPos.z.toFixed(1)})`);
+
+    const distance = beforePos.distanceTo(afterPos);
+    console.log(`📏 实际移动距离: ${distance.toFixed(3)}`);
+
+    if (distance < 0.9) {
+      console.log('🔥 检测到碰撞！位置被调整');
+    } else {
+      console.log('✅ 没有碰撞，正常移动');
+    }
+  },
+
+  // 测试BVH对齐
+  testBVHAlignment: () => {
+    console.log('🎯 测试BVH对齐...');
+    const schoolBuilding = objectManager?.getMainSchoolBuilding();
+    const model = mmdModelManager?.getModel();
+
+    if (!schoolBuilding || !model) {
+      console.log('❌ 建筑物或模型未找到');
+      return;
+    }
+
+    // 检查建筑物位置
+    const buildingObj = schoolBuilding.getBuildingObject();
+    if (buildingObj) {
+      const buildingPos = buildingObj.position;
+      console.log(`🏢 建筑物位置: (${buildingPos.x.toFixed(1)}, ${buildingPos.y.toFixed(1)}, ${buildingPos.z.toFixed(1)})`);
+    }
+
+    // 检查碰撞体位置
+    const collider = schoolBuilding.getCollider();
+    if (collider) {
+      const colliderPos = collider.position;
+      console.log(`🔴 碰撞体位置: (${colliderPos.x.toFixed(1)}, ${colliderPos.y.toFixed(1)}, ${colliderPos.z.toFixed(1)})`);
+
+      // 检查几何体边界框
+      collider.geometry.computeBoundingBox();
+      if (collider.geometry.boundingBox) {
+        const bbox = collider.geometry.boundingBox;
+        console.log(`📦 碰撞体边界框:`);
+        console.log(`   min: (${bbox.min.x.toFixed(1)}, ${bbox.min.y.toFixed(1)}, ${bbox.min.z.toFixed(1)})`);
+        console.log(`   max: (${bbox.max.x.toFixed(1)}, ${bbox.max.y.toFixed(1)}, ${bbox.max.z.toFixed(1)})`);
+      }
+    }
+
+    // 检查人物位置
+    if (model.mesh) {
+      const playerPos = model.mesh.position;
+      console.log(`👤 人物位置: (${playerPos.x.toFixed(1)}, ${playerPos.y.toFixed(1)}, ${playerPos.z.toFixed(1)})`);
+    }
+  },
+
+  // 测试启用/禁用BVH碰撞检测
+  toggleBVHCollision: () => {
+    console.log('🎯 切换BVH碰撞检测...');
+    const model = mmdModelManager?.getModel();
+
+    if (!model) {
+      console.log('❌ 人物模型未找到');
+      return;
+    }
+
+    // 切换BVH碰撞检测状态
+    if ('toggleBVHCollisionEnabled' in model) {
+      (model as any).toggleBVHCollisionEnabled();
+
+      // 切换后立即显示调试信息
+      if ('debugBVHCollision' in model) {
+        (model as any).debugBVHCollision();
+      }
+    } else {
+      console.log('❌ 模型不支持BVH碰撞检测切换');
+    }
+  },
+
+  // 调试BVH碰撞检测状态
+  debugBVH: () => {
+    console.log('🔍 调试BVH碰撞检测状态...');
+    const model = mmdModelManager?.getModel();
+
+    if (!model) {
+      console.log('❌ 人物模型未找到');
+      return;
+    }
+
+    if ('debugBVHCollision' in model) {
+      (model as any).debugBVHCollision();
+    } else {
+      console.log('❌ 模型不支持BVH调试');
+    }
   },
 
 
@@ -306,10 +467,11 @@ const wallScaleControl = {
 // 物理体可视化控制对象
 const physicsVisualizationControl = {
   showPhysicsWalls: true,
-  showSchoolBuildingPhysics: true,
-  showSchoolBuildingBVH: false,
-  showSchoolBuildingCollider: false,
-  schoolBuildingBVHDepth: 10,
+
+  // BVH 可视化控制（参考 characterMovement.js）
+  displayCollider: false,
+  displayBVH: false,
+  visualizeDepth: 10,
   togglePhysicsVisualization: () => {
     // 查找所有物理墙体可视化对象
     const physicsVisualizations: THREE.Object3D[] = [];
@@ -327,41 +489,35 @@ const physicsVisualizationControl = {
 
     console.log(`🔍 物理墙体可视化: ${physicsVisualizationControl.showPhysicsWalls ? '显示' : '隐藏'} (${physicsVisualizations.length}个对象)`);
   },
-  toggleSchoolBuildingPhysics: () => {
+
+  // BVH 可视化控制方法（参考 characterMovement.js）
+  toggleCollider: () => {
     const schoolBuilding = objectManager?.getMainSchoolBuilding();
-    if (schoolBuilding && 'setPhysicsVisualizationVisible' in schoolBuilding) {
-      (schoolBuilding as any).setPhysicsVisualizationVisible(physicsVisualizationControl.showSchoolBuildingPhysics);
+    if (schoolBuilding && 'setVisualizationParams' in schoolBuilding) {
+      (schoolBuilding as any).setVisualizationParams({
+        displayCollider: physicsVisualizationControl.displayCollider
+      });
+      console.log(`🔄 碰撞体可视化: ${physicsVisualizationControl.displayCollider ? '开启' : '关闭'}`);
     }
   },
-  toggleSchoolBuildingBVH: () => {
+
+  toggleBVH: () => {
     const schoolBuilding = objectManager?.getMainSchoolBuilding();
-    if (schoolBuilding && 'setBVHVisualizationVisible' in schoolBuilding) {
-      (schoolBuilding as any).setBVHVisualizationVisible(physicsVisualizationControl.showSchoolBuildingBVH);
+    if (schoolBuilding && 'setVisualizationParams' in schoolBuilding) {
+      (schoolBuilding as any).setVisualizationParams({
+        displayBVH: physicsVisualizationControl.displayBVH
+      });
+      console.log(`🔄 BVH可视化: ${physicsVisualizationControl.displayBVH ? '开启' : '关闭'}`);
     }
   },
-  toggleSchoolBuildingCollider: () => {
+
+  updateBVHDepth: () => {
     const schoolBuilding = objectManager?.getMainSchoolBuilding();
-    if (schoolBuilding && 'setColliderVisible' in schoolBuilding) {
-      (schoolBuilding as any).setColliderVisible(physicsVisualizationControl.showSchoolBuildingCollider);
-    }
-  },
-  updateSchoolBuildingBVHDepth: () => {
-    const schoolBuilding = objectManager?.getMainSchoolBuilding();
-    if (schoolBuilding && 'setBVHVisualizeDepth' in schoolBuilding) {
-      (schoolBuilding as any).setBVHVisualizeDepth(physicsVisualizationControl.schoolBuildingBVHDepth);
-    }
-  },
-  checkColliderInfo: () => {
-    const schoolBuilding = objectManager?.getMainSchoolBuilding();
-    if (schoolBuilding && 'hasValidCollider' in schoolBuilding && 'getBoundsTree' in schoolBuilding) {
-      const hasCollider = (schoolBuilding as any).hasValidCollider();
-      const boundsTree = (schoolBuilding as any).getBoundsTree();
-      console.log('🔍 学校建筑碰撞体信息:');
-      console.log(`   有效碰撞体: ${hasCollider ? '是' : '否'}`);
-      if (boundsTree) {
-        console.log(`   BVH节点数: ${boundsTree.geometry?.attributes?.position?.count / 3 || 0}`);
-        console.log(`   BVH深度: ${boundsTree._maxDepth || '未知'}`);
-      }
+    if (schoolBuilding && 'setVisualizationParams' in schoolBuilding) {
+      (schoolBuilding as any).setVisualizationParams({
+        visualizeDepth: physicsVisualizationControl.visualizeDepth
+      });
+      console.log(`🔄 BVH可视化深度: ${physicsVisualizationControl.visualizeDepth}`);
     }
   }
 }
@@ -375,11 +531,11 @@ gui.add(guiFn, 'createBoxHere').name('在当前位置创建箱子')
 gui.add(guiFn, 'createFallingBoxesNow').name('创建掉落的盒子')
 gui.add(guiFn, 'showPhysicsInfo').name('显示物理信息')
 gui.add(guiFn, 'checkCollisionStatus').name('检查碰撞状态')
-gui.add(guiFn, 'checkBVHStatus').name('检查BVH状态')
-gui.add(guiFn, 'testPhysicsCollision').name('测试物理碰撞')
 gui.add(guiFn, 'checkPhysicsSync').name('检查物理同步')
-gui.add(guiFn, 'forceSimplePhysics').name('强制简单物理体')
-gui.add(guiFn, 'checkDistanceAndPosition').name('检查距离位置')
+gui.add(guiFn, 'testBVHCollision').name('测试BVH状态')
+gui.add(guiFn, 'testCollisionEvent').name('测试碰撞事件')
+gui.add(guiFn, 'testBVHAlignment').name('测试BVH对齐')
+gui.add(guiFn, 'toggleBVHCollision').name('切换BVH碰撞检测')
 
 // 对象管理器控制
 const objectFolder = gui.addFolder('静态对象管理')
@@ -512,28 +668,24 @@ physicsVisualizationFolder.add(physicsVisualizationControl, 'showPhysicsWalls')
     physicsVisualizationControl.togglePhysicsVisualization();
   })
 
-// 学校建筑可视化子文件夹
-const schoolBuildingFolder = physicsVisualizationFolder.addFolder('学校建筑')
-schoolBuildingFolder.add(physicsVisualizationControl, 'showSchoolBuildingPhysics')
-  .name('显示物理体线框')
+// BVH 可视化子文件夹（参考 characterMovement.js）
+const bvhFolder = physicsVisualizationFolder.addFolder('BVH 碰撞检测')
+bvhFolder.add(physicsVisualizationControl, 'displayCollider')
+  .name('显示碰撞体')
   .onChange(() => {
-    physicsVisualizationControl.toggleSchoolBuildingPhysics();
+    physicsVisualizationControl.toggleCollider();
   })
-schoolBuildingFolder.add(physicsVisualizationControl, 'showSchoolBuildingBVH')
+bvhFolder.add(physicsVisualizationControl, 'displayBVH')
   .name('显示BVH辅助线')
   .onChange(() => {
-    physicsVisualizationControl.toggleSchoolBuildingBVH();
+    physicsVisualizationControl.toggleBVH();
   })
-schoolBuildingFolder.add(physicsVisualizationControl, 'showSchoolBuildingCollider')
-  .name('显示碰撞体线框')
-  .onChange(() => {
-    physicsVisualizationControl.toggleSchoolBuildingCollider();
-  })
-schoolBuildingFolder.add(physicsVisualizationControl, 'schoolBuildingBVHDepth', 1, 20, 1)
+bvhFolder.add(physicsVisualizationControl, 'visualizeDepth', 1, 20, 1)
   .name('BVH可视化深度')
   .onChange(() => {
-    physicsVisualizationControl.updateSchoolBuildingBVHDepth();
+    physicsVisualizationControl.updateBVHDepth();
   })
+bvhFolder.open()
 
 physicsVisualizationFolder.add(physicsVisualizationControl, 'togglePhysicsVisualization').name('切换可视化')
 
@@ -592,6 +744,11 @@ onMounted(async () => {
 
     // 创建物理地面
     physicsManager.createGround();
+
+    // 设置BVH碰撞检测
+    setTimeout(() => {
+      setupBVHCollision();
+    }, 1500); // 等待建筑物加载完成
 
     hadRenderCamera = camera
 
@@ -696,6 +853,45 @@ function handleKeyUp(event: KeyboardEvent) {
 // initPhysicsWorld和createGround函数现在由PhysicsManager处理
 
 // createFallingBoxes函数现在由TestBoxManager处理
+
+// 设置BVH碰撞检测
+function setupBVHCollision() {
+  console.log('🔧 设置BVH碰撞检测...');
+
+  // 获取人物模型
+  const model = mmdModelManager?.getModel();
+  if (!model || !('registerBVHCollider' in model)) {
+    console.log('⚠️ 人物模型未找到或不支持BVH碰撞检测');
+    return;
+  }
+
+  // 获取学校建筑
+  const schoolBuilding = objectManager?.getMainSchoolBuilding();
+  if (!schoolBuilding) {
+    console.log('⚠️ 学校建筑未找到');
+    return;
+  }
+
+  // 获取建筑物的BVH碰撞体
+  const collider = schoolBuilding.getCollider();
+  if (collider) {
+    (model as any).registerBVHCollider(collider);
+    console.log('✅ 学校建筑BVH碰撞体已注册到人物模型');
+  } else {
+    console.log('⚠️ 学校建筑BVH碰撞体未创建，稍后重试...');
+    // 如果BVH还没创建，再等一会儿重试
+    setTimeout(() => {
+      const retryCollider = schoolBuilding.getCollider();
+      if (retryCollider) {
+        (model as any).registerBVHCollider(retryCollider);
+        console.log('✅ 学校建筑BVH碰撞体已注册到人物模型（重试成功）');
+      } else {
+        console.log('❌ 学校建筑BVH碰撞体创建失败');
+      }
+    }, 1000);
+  }
+}
+
 </script>
 
 <template>
