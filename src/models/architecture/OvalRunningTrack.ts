@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import * as CANNON from 'cannon-es';
 import * as BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { StaticGeometryGenerator } from 'three-mesh-bvh';
 import { BaseModel, InitialTransform } from './BaseModel';
@@ -42,15 +41,12 @@ export class OvalRunningTrack extends BaseModel {
   private gymEquipments: (OnePullUpBar | OutdoorGym)[] = [];
   private usedPositions: THREE.Vector3[] = []; // 记录已使用的位置
 
-  constructor(scene: THREE.Scene, physicsWorld?: CANNON.World);
-  constructor(scene: THREE.Scene, physicsWorld: CANNON.World | undefined, initialTransform: InitialTransform);
   constructor(scene: THREE.Scene, initialTransform: InitialTransform);
   constructor(
     scene: THREE.Scene,
-    physicsWorldOrTransform?: CANNON.World | InitialTransform,
     initialTransform?: InitialTransform
   ) {
-    super(scene, physicsWorldOrTransform as any, initialTransform as InitialTransform);
+    super(scene, initialTransform as any);
     this.modelGroup.name = 'OvalRunningTrack';
 
     // 初始化加载管理器
@@ -130,13 +126,13 @@ export class OvalRunningTrack extends BaseModel {
     let equipment: OnePullUpBar | OutdoorGym;
 
     if (equipmentType === 'pullup') {
-      equipment = new OnePullUpBar(this.scene, this.physicsWorld, {
+      equipment = new OnePullUpBar(this.scene, {
         position: position,
         rotation: { x: 0, y: flipAngle, z: 0 },
         scale: scaleMultiplier
       });
     } else {
-      equipment = new OutdoorGym(this.scene, this.physicsWorld, {
+      equipment = new OutdoorGym(this.scene,{
         position: position,
         rotation: { x: 0, y: flipAngle, z: 0 },
         scale: scaleMultiplier
@@ -149,11 +145,7 @@ export class OvalRunningTrack extends BaseModel {
     // 将器材添加到 OvalRunningTrack 组内，而不是直接添加到场景
     this.modelGroup.add(equipment.getModelGroup());
 
-    //创建物理
-    //TODO:需要经过一些延迟才能让物理以原来的缩放生效，原因未知
-    setTimeout(() => {
-      equipment.createModelPhysicsBody();
-    }, 100);
+    // 🔥 物理体创建已移除，现在使用 BVH 统一碰撞检测系统
 
     // 记录器材
     this.gymEquipments.push(equipment);
@@ -511,266 +503,6 @@ export class OvalRunningTrack extends BaseModel {
       checkLoaded();
     });
   }
-
-  /**
-   * 创建跑道物理平面 - 手动创建椭圆形跑道物理体
-   */
-  private createPhysicsPlane(): void {
-    if (!this.physicsWorld) {
-      console.log('没有物理世界，跳过物理平面创建');
-      return;
-    }
-
-    console.log('=== 手动创建椭圆形跑道物理体 ===');
-
-    // 创建草坪物理体
-    this.createGrassFieldPhysics();
-
-    // 创建椭圆形跑道的物理几何体
-    this.createOvalTrackPhysics();
-
-    console.log('跑道物理体创建完成');
-  }
-
-  /**
-   * 创建草坪物理体
-   */
-  private createGrassFieldPhysics(): void {
-    if (!this.physicsWorld) return;
-
-    console.log('创建草坪物理体');
-
-    // 创建中央矩形草地物理体
-    const rectWidth = this.straightLength;
-    const rectHeight = this.curveRadius * 2;
-    const rectGeometry = new THREE.PlaneGeometry(rectWidth, rectHeight, 20, 20);
-    rectGeometry.rotateX(-Math.PI / 2);
-
-    // 创建左半圆草地物理体
-    const leftCircleGeometry = new THREE.CircleGeometry(this.curveRadius, 16, 0, Math.PI);
-    leftCircleGeometry.rotateX(-Math.PI / 2);
-    leftCircleGeometry.rotateZ(0); // 不需要额外旋转
-    leftCircleGeometry.translate(-this.straightLength / 2, 0, 0);
-
-    // 创建右半圆草地物理体
-    const rightCircleGeometry = new THREE.CircleGeometry(this.curveRadius, 16, 0, Math.PI);
-    rightCircleGeometry.rotateX(-Math.PI / 2);
-    rightCircleGeometry.rotateZ(Math.PI); // 旋转180度
-    rightCircleGeometry.translate(this.straightLength / 2, 0, 0);
-
-    // 合并草地几何体
-    const grassGeometries = [rectGeometry, leftCircleGeometry, rightCircleGeometry];
-    const mergedGrassGeometry = BufferGeometryUtils.mergeGeometries(grassGeometries);
-
-    // 从几何体创建物理体
-    this.createTrimeshFromGeometry(mergedGrassGeometry, '草坪');
-
-    // 创建调试可视化
-    this.createGeometryDebugVisualization(mergedGrassGeometry);
-
-    // 清理
-    grassGeometries.forEach(geo => geo.dispose());
-    mergedGrassGeometry.dispose();
-  }
-
-  /**
-   * 创建椭圆形跑道物理体
-   */
-  private createOvalTrackPhysics(): void {
-    // 创建椭圆形跑道的几何体
-    const trackGeometry = this.createOvalTrackGeometry();
-
-    // 从几何体创建物理体
-    this.createTrimeshFromGeometry(trackGeometry, '跑道');
-
-    // 创建调试可视化
-    this.createGeometryDebugVisualization(trackGeometry);
-
-    // 清理
-    trackGeometry.dispose();
-  }
-
-  /**
-   * 创建椭圆形跑道几何体 - 基于实际跑道构造
-   */
-  private createOvalTrackGeometry(): THREE.BufferGeometry {
-    const geometries: THREE.BufferGeometry[] = [];
-
-    // 跑道参数（与createTrack()中的参数保持一致）
-    const extensionLength = this.curveRadius * 2;
-    const extendedStraightLength = this.straightLength + extensionLength;
-
-    // 为每条跑道创建几何体
-    for (let lane = 1; lane <= this.numberOfLanes; lane++) {
-      const innerRadius = this.curveRadius + (lane - 1) * this.laneWidth;
-      const outerRadius = this.curveRadius + lane * this.laneWidth;
-
-      // 1. 上直道几何体
-      const topStraightGeometry = new THREE.PlaneGeometry(extendedStraightLength, this.laneWidth, 20, 2);
-      topStraightGeometry.rotateX(-Math.PI / 2);
-      topStraightGeometry.translate(extensionLength / 2, 0, innerRadius + this.laneWidth / 2);
-      geometries.push(topStraightGeometry);
-
-      // 2. 下直道几何体
-      const bottomStraightGeometry = new THREE.PlaneGeometry(extendedStraightLength, this.laneWidth, 20, 2);
-      bottomStraightGeometry.rotateX(-Math.PI / 2);
-      bottomStraightGeometry.translate(-extensionLength / 2, 0, -(innerRadius + this.laneWidth / 2));
-      geometries.push(bottomStraightGeometry);
-
-      // 3. 左弯道几何体
-      const leftCurveGeometry = new THREE.RingGeometry(innerRadius, outerRadius, 16, 4, 0, Math.PI);
-      leftCurveGeometry.rotateX(-Math.PI / 2);
-      leftCurveGeometry.rotateY(Math.PI / 2);
-      leftCurveGeometry.rotateZ(0); // 不需要额外旋转
-      leftCurveGeometry.translate(-this.straightLength / 2, 0, 0);
-      geometries.push(leftCurveGeometry);
-
-      // 4. 右弯道几何体
-      const rightCurveGeometry = new THREE.RingGeometry(innerRadius, outerRadius, 16, 4, 0, Math.PI);
-      rightCurveGeometry.rotateX(-Math.PI / 2);
-      rightCurveGeometry.rotateY(Math.PI / 2);
-      rightCurveGeometry.rotateZ(Math.PI); // 旋转180度
-      rightCurveGeometry.translate(this.straightLength / 2, 0, 0);
-      geometries.push(rightCurveGeometry);
-    }
-
-    // 添加弯道中心填充区域
-    // 左半圆中心
-    const leftCenterGeometry = new THREE.CircleGeometry(this.curveRadius, 16, 0, Math.PI);
-    leftCenterGeometry.rotateX(-Math.PI / 2);
-    leftCenterGeometry.rotateZ(0); // 不需要额外旋转
-    leftCenterGeometry.rotateY(Math.PI / 2);
-    leftCenterGeometry.translate(-this.straightLength / 2, 0, 0);
-    geometries.push(leftCenterGeometry);
-
-    // 右半圆中心
-    const rightCenterGeometry = new THREE.CircleGeometry(this.curveRadius, 16, 0, Math.PI);
-    rightCenterGeometry.rotateX(-Math.PI / 2);
-    rightCenterGeometry.rotateZ(Math.PI); // 旋转180度
-    rightCenterGeometry.rotateY(-Math.PI / 2);
-    rightCenterGeometry.translate(this.straightLength / 2, 0, 0);
-    geometries.push(rightCenterGeometry);
-
-    // 合并所有几何体
-    const mergedGeometry = BufferGeometryUtils.mergeGeometries(geometries);
-
-    // 清理临时几何体
-    geometries.forEach(geo => geo.dispose());
-
-    console.log(`创建椭圆跑道几何体，基于实际跑道构造`);
-
-    return mergedGeometry;
-  }
-
-  // 存储多个物理体
-  private physicsBodies: CANNON.Body[] = [];
-
-  /**
-   * 从几何体创建 CANNON Trimesh
-   */
-  private createTrimeshFromGeometry(geometry: THREE.BufferGeometry, name: string = 'Trimesh'): void {
-    if (!this.physicsWorld) return;
-
-    const vertices = geometry.attributes.position.array;
-    const indices = geometry.index ? geometry.index.array : this.generateIndices(vertices.length / 3);
-
-    // 转换为 CANNON 格式
-    const cannonVertices: number[] = [];
-    const cannonFaces: number[] = [];
-
-    // 复制顶点数据
-    for (let i = 0; i < vertices.length; i += 3) {
-      cannonVertices.push(vertices[i], vertices[i + 1], vertices[i + 2]);
-    }
-
-    // 复制面数据
-    for (let i = 0; i < indices.length; i += 3) {
-      cannonFaces.push(indices[i], indices[i + 1], indices[i + 2]);
-    }
-
-    // 创建 Trimesh 形状
-    const shape = new CANNON.Trimesh(cannonVertices, cannonFaces);
-
-    const body = new CANNON.Body({
-      mass: 0, // 静态物体
-      material: new CANNON.Material({
-        friction: 0.8,
-        restitution: 0.1
-      })
-    });
-
-    body.addShape(shape);
-
-    // 设置物理体位置和旋转
-    const position = this.getPosition();
-    const rotation = this.getRotation();
-
-    body.position.set(position.x, position.y, position.z);
-    body.quaternion.setFromEuler(rotation.x, rotation.y, rotation.z);
-
-    this.physicsWorld.addBody(body);
-
-    // 将物理体添加到数组中，而不是覆盖
-    this.physicsBodies.push(body);
-
-    // 设置主物理体为第一个创建的物理体
-    if (!this.physicsBody) {
-      this.physicsBody = body;
-    }
-
-    console.log(`创建 ${name} 物理体，顶点数: ${cannonVertices.length / 3}, 面数: ${cannonFaces.length / 3}`);
-  }
-
-  /**
-   * 创建几何体调试可视化
-   */
-  private createGeometryDebugVisualization(geometry: THREE.BufferGeometry): void {
-    // 创建线框网格显示实际的物理几何体
-    const debugMaterial = new THREE.MeshBasicMaterial({
-      color: 0x00ff00,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.3
-    });
-
-    const debugMesh = new THREE.Mesh(geometry.clone(), debugMaterial);
-    debugMesh.name = 'GeometryPhysicsDebug';
-    debugMesh.position.set(0, 0.1, 0); // 稍微抬高一点显示
-
-    this.modelGroup.add(debugMesh);
-
-    console.log('几何体物理调试可视化已添加（绿色线框）');
-  }
-
-  /**
-   * 后备物理体创建方案
-   */
-  private createFallbackPhysics(): void {
-    console.log('使用后备物理体方案');
-
-    // 计算跑道尺寸
-    const outerRadius = this.curveRadius + (this.numberOfLanes * this.laneWidth);
-    const totalLength = this.straightLength + (outerRadius * 2);
-    const totalWidth = outerRadius * 2;
-
-    // 创建简单盒子物理体
-    const planeShape = new CANNON.Box(new CANNON.Vec3(totalLength / 2, 0.5, totalWidth / 2));
-    this.createPhysicsBody(planeShape, 0);
-
-    console.log(`后备物理体创建完成 - 尺寸: ${totalLength.toFixed(2)} x ${totalWidth.toFixed(2)}`);
-  }
-
-  /**
-   * 为没有索引的几何体生成索引
-   */
-  private generateIndices(vertexCount: number): number[] {
-    const indices: number[] = [];
-    for (let i = 0; i < vertexCount; i++) {
-      indices.push(i);
-    }
-    return indices;
-  }
-
   /**
    * 创建矩形草地中心区域
    */
@@ -1210,13 +942,7 @@ export class OvalRunningTrack extends BaseModel {
     // 先清理所有健身器材
     this.clearAllGymEquipments();
 
-    // 清理所有物理体
-    if (this.physicsWorld && this.physicsBodies.length > 0) {
-      this.physicsBodies.forEach(body => {
-        this.physicsWorld!.removeBody(body);
-      });
-      this.physicsBodies = [];
-    }
+    // BVH碰撞体会在父类dispose中自动清理
 
     // 调用父类的 dispose 方法
     super.dispose();

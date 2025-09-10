@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import * as CANNON from 'cannon-es';
 
 /**
  * 初始变换参数接口
@@ -16,8 +15,8 @@ export interface InitialTransform {
 export abstract class BaseModel {
   protected scene: THREE.Scene;
   protected modelGroup: THREE.Group;
-  protected physicsWorld?: CANNON.World;
-  protected physicsBody?: CANNON.Body;
+  protected isCollider: boolean = false; // 标记是否为碰撞体
+  protected name: string = ''
 
   // 变换属性
   private _position: THREE.Vector3;
@@ -25,42 +24,23 @@ export abstract class BaseModel {
   private _scale: THREE.Vector3;
 
   // 构造函数重载声明
-  constructor(scene: THREE.Scene, physicsWorld?: CANNON.World);
-  constructor(scene: THREE.Scene, physicsWorld: CANNON.World | undefined, initialTransform: InitialTransform);
-  constructor(scene: THREE.Scene, initialTransform: InitialTransform);
+  constructor(scene: THREE.Scene , initialTransform: InitialTransform);
+  constructor(scene: THREE.Scene , initialTransform: InitialTransform, name:string);
 
   // 构造函数实现
   constructor(
     scene: THREE.Scene,
-    physicsWorldOrTransform?: CANNON.World | InitialTransform,
-    initialTransform?: InitialTransform
+    initialTransform?: InitialTransform,
+    name: string = 'staticModel',
   ) {
     this.scene = scene;
     this.modelGroup = new THREE.Group();
-
-    // 解析参数
-    let physicsWorld: CANNON.World | undefined;
-    let transform: InitialTransform | undefined;
-
-    if (physicsWorldOrTransform) {
-      // 检查第二个参数是物理世界还是变换参数
-      if ('position' in physicsWorldOrTransform || 'rotation' in physicsWorldOrTransform || 'scale' in physicsWorldOrTransform) {
-        // 第二个参数是变换参数
-        transform = physicsWorldOrTransform as InitialTransform;
-        physicsWorld = undefined;
-      } else {
-        // 第二个参数是物理世界
-        physicsWorld = physicsWorldOrTransform as CANNON.World;
-        transform = initialTransform;
-      }
-    }
-
-    this.physicsWorld = physicsWorld;
+    this.name = name
 
     // 初始化变换属性
-    this._position = this.parseVector3(transform?.position, new THREE.Vector3(0, 0, 0));
-    this._rotation = this.parseEuler(transform?.rotation, new THREE.Euler(0, 0, 0));
-    this._scale = this.parseScale(transform?.scale, new THREE.Vector3(1, 1, 1));
+    this._position = this.parseVector3(initialTransform?.position, new THREE.Vector3(0, 0, 0));
+    this._rotation = this.parseEuler(initialTransform?.rotation, new THREE.Euler(0, 0, 0));
+    this._scale = this.parseScale(initialTransform?.scale, new THREE.Vector3(1, 1, 1));
 
     // 应用初始变换
     this.updateTransform();
@@ -258,38 +238,8 @@ export abstract class BaseModel {
     return new THREE.Vector3(value.x, value.y, value.z);
   }
 
-  /**
-   * 创建物理体（子类可重写）
-   */
-  protected createPhysicsBody(shape: CANNON.Shape, mass: number = 0): CANNON.Body {
-    if (!this.physicsWorld) {
-      throw new Error('物理世界未初始化');
-    }
-
-    this.physicsBody = new CANNON.Body({
-      mass,
-      material: new CANNON.Material({
-        friction: 0.5,
-        restitution: 0.3
-      })
-    });
-
-    this.physicsBody.addShape(shape);
-    this.updatePhysicsBodyTransform();
-    this.physicsWorld.addBody(this.physicsBody);
-
-    return this.physicsBody;
-  }
-
-  /**
-   * 更新物理体的变换
-   */
-  protected updatePhysicsBodyTransform(): void {
-    if (this.physicsBody) {
-      this.physicsBody.position.set(this._position.x, this._position.y, this._position.z);
-      this.physicsBody.quaternion.setFromEuler(this._rotation.x, this._rotation.y, this._rotation.z);
-    }
-  }
+  // 注意：BVH碰撞体现在由 BVHPhysics.createSceneCollider 统一管理
+  // 不再需要单独的碰撞体创建方法
 
   /**
    * 更新模型组的变换矩阵
@@ -299,8 +249,7 @@ export abstract class BaseModel {
     this.modelGroup.rotation.copy(this._rotation);
     this.modelGroup.scale.copy(this._scale);
 
-    // 同时更新物理体变换
-    this.updatePhysicsBodyTransform();
+    // BVH碰撞体会自动更新，无需手动同步
   }
 
   /**
@@ -315,6 +264,7 @@ export abstract class BaseModel {
    */
   addToScene(): void {
     if (!this.scene.children.includes(this.modelGroup)) {
+      this.modelGroup.name = this.name
       this.scene.add(this.modelGroup);
     }
   }
@@ -332,11 +282,9 @@ export abstract class BaseModel {
   dispose(): void {
     this.removeFromScene();
 
-    // 清理物理体
-    if (this.physicsBody && this.physicsWorld) {
-      this.physicsWorld.removeBody(this.physicsBody);
-      this.physicsBody = undefined;
-    }
+    // BVH碰撞体会在BVHPhysics系统中自动清理
+    // 这里只需要标记为非碰撞体
+    this.isCollider = false;
 
     // 递归清理所有子对象
     this.modelGroup.traverse((child) => {

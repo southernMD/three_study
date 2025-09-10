@@ -85,8 +85,9 @@ export class MMDModelManager {
    * 重置模型位置
    */
   resetPosition(): void {
-    if (this.mmdModel) {
-      this.mmdModel.resetPosition();
+    if (this.mmdModel && this.mmdModel.mesh) {
+      this.mmdModel.mesh.position.set(0, 0, 0);
+      this.mmdModel.mesh.rotation.set(0, 0, 0);
     }
     
     if (this.lookCamera) {
@@ -98,10 +99,7 @@ export class MMDModelManager {
       this.cameraControls.maxPolarAngle = Math.PI * 3 / 4;
     }
     
-    // 更新相机辅助器（现在由模型自己管理）
-    if (this.mmdModel) {
-      this.mmdModel.updateCameraHelpers();
-    }
+
     
     // 重新渲染
     if (this.lookCamera) {
@@ -113,8 +111,10 @@ export class MMDModelManager {
    * 切换辅助线显示
    */
   toggleHelpers(): void {
-    if (this.mmdModel) {
-      this.mmdModel.toggleHelpers();
+    if (this.mmdModel && 'toggleHelpers' in this.mmdModel) {
+      (this.mmdModel as any).toggleHelpers();
+    } else {
+      console.log('模型不支持辅助线切换');
     }
   }
 
@@ -154,7 +154,7 @@ export class MMDModelManager {
    */
   handleKeyDown(event: KeyboardEvent): void {
     if (this.mmdModel) {
-      this.mmdModel.handleKeyDown(event, this.keyMap);
+      this.mmdModel.handleKeyDown(event);
     }
   }
 
@@ -163,7 +163,7 @@ export class MMDModelManager {
    */
   handleKeyUp(event: KeyboardEvent): void {
     if (this.mmdModel) {
-      this.mmdModel.handleKeyUp(event, this.keyMap);
+      this.mmdModel.handleKeyUp(event);
     }
   }
 
@@ -171,8 +171,17 @@ export class MMDModelManager {
    * 更新模型（在动画循环中调用）
    */
   update(deltaTime: number): void {
-    if (this.mmdModel && this.cameraControls && this.lookCamera) {
-      this.mmdModel.update(deltaTime, this.cameraControls, this.lookCamera);
+    if (this.mmdModel) {
+      this.mmdModel.update();
+      // 同时调用动画更新方法
+      if ('updateAnimation' in this.mmdModel) {
+        (this.mmdModel as any).updateAnimation(deltaTime);
+      }
+
+      // 更新跟随相机位置（按照three_study-main的实现）
+      if (this.lookCamera && this.cameraControls) {
+        this.mmdModel.updateCameraFollow(this.lookCamera, this.cameraControls);
+      }
     }
   }
 
@@ -180,10 +189,7 @@ export class MMDModelManager {
    * 清理资源
    */
   cleanup(): void {
-    // 清理相机控制器资源
-    if (this.mmdModel && this.cameraControls) {
-      this.mmdModel.cleanupCameraControls(this.cameraControls);
-    }
+    // BVH物理系统不需要特殊的相机控制器清理
     
     // 释放控制器
     if (this.cameraControls) {
@@ -206,6 +212,15 @@ export class MMDModelManager {
    * 获取模型尺寸
    */
   getModelDimensions(): { width: number; height: number; depth: number } | null {
-    return this.mmdModel ? this.mmdModel.getModelDimensions() : null;
+    if (this.mmdModel && this.mmdModel.mesh) {
+      const box = new THREE.Box3().setFromObject(this.mmdModel.mesh);
+      const size = box.getSize(new THREE.Vector3());
+      return {
+        width: size.x,
+        height: size.y,
+        depth: size.z
+      };
+    }
+    return null;
   }
 }

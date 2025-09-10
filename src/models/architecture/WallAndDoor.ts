@@ -1,21 +1,21 @@
 import * as THREE from 'three';
 import { BaseModel, InitialTransform } from "./BaseModel";
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import * as CANNON from 'cannon-es';
 import { PHYSICS_CONSTANTS, getGroundFullSize } from '../../constants/PhysicsConstants';
+
 interface GLTF {
-  scene: THREE.Group;
-  scenes: THREE.Group[];
-  animations: THREE.AnimationClip[];
-  cameras: THREE.Camera[];
-  asset: {
-    copyright?: string;
-    generator?: string;
-    version?: string;
-    minVersion?: string;
-    extensions?: any;
-    extras?: any;
-  };
+    scene: THREE.Group;
+    scenes: THREE.Group[];
+    animations: THREE.AnimationClip[];
+    cameras: THREE.Camera[];
+    asset: {
+        copyright?: string;
+        generator?: string;
+        version?: string;
+        minVersion?: string;
+        extensions?: any;
+        extras?: any;
+    };
 }
 export class WallAndDoor extends BaseModel {
     // 独立的对象
@@ -23,23 +23,20 @@ export class WallAndDoor extends BaseModel {
     private wallObject: THREE.Object3D | null = null;      // 墙体对象
     private gateObject: THREE.Group | null = null;     // 门对象
 
-    // 物理体数组
-    private physicsBodies: CANNON.Body[] = [];
-
     // 可控制的缩放值
-    public wallScale:number
+    public wallScale: number
 
-    constructor(scene: THREE.Scene, wallScale:number,physicsWorld?: CANNON.World);
-    constructor(scene: THREE.Scene, wallScale:number,physicsWorld: CANNON.World | undefined, initialTransform: InitialTransform);
-    constructor(scene: THREE.Scene, wallScale:number,initialTransform: InitialTransform);
+    // 注意：BVH碰撞体现在由 BVHPhysics.createSceneCollider 统一管理
+    // 不再需要单独的碰撞体创建和管理
+
+    constructor(scene: THREE.Scene, wallScale: number, initialTransform: InitialTransform);
 
     constructor(
         scene: THREE.Scene,
-        wallScale:number = 1,
-        physicsWorldOrTransform?: CANNON.World | InitialTransform,
+        wallScale: number = 1,
         initialTransform?: InitialTransform,
     ) {
-        super(scene,physicsWorldOrTransform as any, initialTransform as InitialTransform);
+        super(scene, initialTransform as any);
         // 对象将在加载时初始化
         this.gateObject = new THREE.Group();
         this.wallScale = wallScale;
@@ -76,7 +73,7 @@ export class WallAndDoor extends BaseModel {
         console.log(this.wallObject);
         // 创建围绕地板的墙体边界
         this.createGroundBoundary();
-        
+
         this.addToScene();
         console.log('✅ 部件提取完成，已创建独立对象');
     }
@@ -203,7 +200,7 @@ export class WallAndDoor extends BaseModel {
         wallCount += this.createSideBoundaryWalls(
             'North', Math.PI,
             PHYSICS_CONSTANTS.GROUND_SIZE_X - position.x * scale, // 起始X
-            PHYSICS_CONSTANTS.GROUND_SIZE_Z , // 固定Z
+            PHYSICS_CONSTANTS.GROUND_SIZE_Z, // 固定Z
             wallWidth, scale,
             PHYSICS_CONSTANTS.GROUND_SIZE_X * 2, // 边长
             true, // X方向移动 (但是负方向)
@@ -277,15 +274,14 @@ export class WallAndDoor extends BaseModel {
                 if (totalUsedLength > sideLength) {
                     // 超过边界，需要裁剪
                     const excessLength = totalUsedLength - sideLength;
-                    this.clipWallMaterial(wall, sideName, startX, startZ, sideLength,scale);
+                    this.clipWallMaterial(wall, sideName, startX, startZ, sideLength, scale);
                     console.log(`   ✂️ ${sideName}边最后墙体超出${excessLength.toFixed(2)}，需要裁剪`);
                 }
             }
 
             this.modelGroup.add(wall);
 
-            // 为墙体添加物理体
-            this.createWallPhysicsBody(wall, posX, posZ, rotation, scale);
+            // 注意：BVH碰撞体现在由 BVHPhysics.createSceneCollider 统一管理
 
             actualCount++;
 
@@ -296,139 +292,9 @@ export class WallAndDoor extends BaseModel {
     }
 
     /**
-     * 为墙体创建物理体
-     */
-    private createWallPhysicsBody(wall: THREE.Object3D, posX: number, posZ: number, rotation: number, scale: number): void {
-        if (!this.physicsWorld) {
-            console.log('⚠️ 物理世界未初始化，跳过墙体物理体创建');
-            return;
-        }
-
-        // 获取墙体的实际原始尺寸（未缩放前）
-        const wallBounds = BaseModel.getBoundingBoxSize(this.wallObject!);
-        
-
-        // 考虑缩放的实际尺寸
-        const actualWidth = wallBounds.width * scale;
-        const actualHeight = (wallBounds.height + 2) * scale ;
-        const actualDepth = wallBounds.depth * scale;
-
-        console.log(`   📏 墙体原始尺寸: (${wallBounds.width.toFixed(2)}, ${wallBounds.height.toFixed(2)}, ${wallBounds.depth.toFixed(2)})`);
-        console.log(`   📏 墙体缩放后尺寸: (${actualWidth.toFixed(2)}, ${actualHeight.toFixed(2)}, ${actualDepth.toFixed(2)})`);
-        console.log(`   🔄 墙体旋转角度: ${(rotation * 180 / Math.PI).toFixed(1)}度`);
-
-        // 创建物理体形状（盒子）- CANNON.Box需要半尺寸
-        const wallShape = new CANNON.Box(new CANNON.Vec3(
-            actualWidth / 2,   // 半宽
-            actualHeight / 2,  // 半高
-            actualDepth / 2    // 半深
-        ));
-
-        // 创建物理体
-        const wallBody = new CANNON.Body({
-            mass: 0, // 静态物体
-            material: new CANNON.Material({
-                friction: PHYSICS_CONSTANTS.DEFAULT_FRICTION,
-                restitution: PHYSICS_CONSTANTS.DEFAULT_RESTITUTION
-            })
-        });
-
-        // 添加形状
-        wallBody.addShape(wallShape);
-
-        // 设置位置和旋转
-        wallBody.position.set(posX, actualHeight / 2, posZ); // Y位置设为墙体高度的一半
-
-        // 使用墙体对象的实际旋转
-        wallBody.quaternion.set(
-            wall.quaternion.x,
-            wall.quaternion.y,
-            wall.quaternion.z,
-            wall.quaternion.w
-        );
-
-        console.log(`   🔄 墙体实际旋转: Y=${wall.rotation.y.toFixed(3)} (${(wall.rotation.y * 180 / Math.PI).toFixed(1)}度)`);
-        console.log(`   🔄 物理体四元数: (${wallBody.quaternion.x.toFixed(3)}, ${wallBody.quaternion.y.toFixed(3)}, ${wallBody.quaternion.z.toFixed(3)}, ${wallBody.quaternion.w.toFixed(3)})`);
-
-        // 添加到物理世界
-        this.physicsWorld.addBody(wallBody);
-
-        // 存储物理体引用（用于后续清理）
-        if (!this.physicsBodies) {
-            this.physicsBodies = [];
-        }
-        this.physicsBodies.push(wallBody);
-
-        // 创建物理体可视化
-        this.createPhysicsBodyVisualization(wallBody, actualWidth, actualHeight, actualDepth);
-
-        console.log(`   ⚡ 墙体物理体已创建: 位置(${posX.toFixed(1)}, ${(actualHeight / 2).toFixed(1)}, ${posZ.toFixed(1)}), 尺寸(${actualWidth.toFixed(1)}, ${actualHeight.toFixed(1)}, ${actualDepth.toFixed(1)})`);
-    }
-
-    /**
-     * 创建物理体可视化
-     */
-    private createPhysicsBodyVisualization(physicsBody: CANNON.Body, width: number, height: number, depth: number): void {
-        // 创建盒子几何体来显示物理体
-        const boxGeometry = new THREE.BoxGeometry(width, height, depth);
-
-        // 创建线框材质
-        const wireframeMaterial = new THREE.MeshBasicMaterial({
-            color: 0x00ff00,
-            transparent: true,
-            opacity: 0.6,
-            wireframe: true
-        });
-
-        // 创建实心材质
-        const solidMaterial = new THREE.MeshBasicMaterial({
-            color: 0x00ff00,
-            transparent: true,
-            opacity: 0.2,
-            side: THREE.DoubleSide
-        });
-
-        // 创建线框网格
-        const wireframeMesh = new THREE.Mesh(boxGeometry, wireframeMaterial);
-        wireframeMesh.position.copy(physicsBody.position as any);
-        wireframeMesh.quaternion.copy(physicsBody.quaternion as any);
-        wireframeMesh.name = `PhysicsWallVisualization_Wireframe_${Date.now()}`;
-
-        // 创建实心网格
-        const solidMesh = new THREE.Mesh(boxGeometry.clone(), solidMaterial);
-        solidMesh.position.copy(physicsBody.position as any);
-        solidMesh.quaternion.copy(physicsBody.quaternion as any);
-        solidMesh.name = `PhysicsWallVisualization_Solid_${Date.now()}`;
-
-        // 添加到场景
-        this.modelGroup.add(wireframeMesh);
-        this.modelGroup.add(solidMesh);
-
-        console.log(`   📦 物理墙体可视化已创建: 位置(${physicsBody.position.x.toFixed(1)}, ${physicsBody.position.y.toFixed(1)}, ${physicsBody.position.z.toFixed(1)})`);
-        console.log(`   🔄 可视化旋转: 四元数(${physicsBody.quaternion.x.toFixed(2)}, ${physicsBody.quaternion.y.toFixed(2)}, ${physicsBody.quaternion.z.toFixed(2)}, ${physicsBody.quaternion.w.toFixed(2)})`);
-    }
-
-    /**
-     * 重写dispose方法，清理墙体物理体
-     */
-    dispose(): void {
-        // 清理墙体物理体
-        if (this.physicsWorld && this.physicsBodies.length > 0) {
-            this.physicsBodies.forEach(body => {
-                this.physicsWorld!.removeBody(body);
-            });
-            this.physicsBodies = [];
-            console.log('🗑️ 已清理所有墙体物理体');
-        }
-
-        // 调用父类的dispose方法
-        super.dispose();
-    }
-
-    /**
-     * 使用材质裁剪平面裁剪墙体
-     */
-    private clipWallMaterial(wall: THREE.Object3D, sideName: string, startX: number, startZ: number, sideLength: number,scale:number): void {
+ * 使用材质裁剪平面裁剪墙体
+ */
+    private clipWallMaterial(wall: THREE.Object3D, sideName: string, startX: number, startZ: number, sideLength: number, scale: number): void {
         wall.traverse((child) => {
             if (child instanceof THREE.Mesh && child.material) {
                 // 计算边界点和法线方向
@@ -437,7 +303,7 @@ export class WallAndDoor extends BaseModel {
 
                 if (sideName === 'South') {
                     // 南边：右边界点，法线向左
-                    boundaryPoint = new THREE.Vector3(startX + sideLength - scale * this.wallObject!.position.x , 0, startZ);
+                    boundaryPoint = new THREE.Vector3(startX + sideLength - scale * this.wallObject!.position.x, 0, startZ);
                     normal = new THREE.Vector3(-1, 0, 0);
                 } else if (sideName === 'North') {
                     // 北边：左边界点，法线向右
@@ -469,12 +335,12 @@ export class WallAndDoor extends BaseModel {
         });
     }
 
-    findWallGroup(group:THREE.Group<THREE.Object3DEventMap>): THREE.Group<THREE.Object3DEventMap>[] {
-        if(group.name !== 'GLTF_SceneRootNode' && group.children.length == 1){
-           return this.findWallGroup(group.children[0] as any);
-        }else if(group.name === 'GLTF_SceneRootNode'){
+    findWallGroup(group: THREE.Group<THREE.Object3DEventMap>): THREE.Group<THREE.Object3DEventMap>[] {
+        if (group.name !== 'GLTF_SceneRootNode' && group.children.length == 1) {
+            return this.findWallGroup(group.children[0] as any);
+        } else if (group.name === 'GLTF_SceneRootNode') {
             return group.children as any;
-        }else{
+        } else {
             return [];
         }
     }
@@ -549,29 +415,65 @@ export class WallAndDoor extends BaseModel {
         };
     }
 
+
     /**
-     * 重新创建边界墙（用于实时更新scale）
+     * 重新创建边界墙（当缩放改变时调用）
      */
-    recreateBoundaryWalls(): void {
+    public recreateBoundaryWalls(): void {
         if (!this.wallObject) {
-            console.log('❌ 墙体对象不存在，无法重新创建边界');
+            console.log('⚠️ 墙体对象未加载，无法重新创建边界墙');
             return;
         }
 
-        // 清除现有的边界墙、裁剪平面和边界点可视化
-        const boundaryWalls = this.modelGroup.children.filter(child =>
-            child.name.includes('BoundaryWall') ||
-            child.name.includes('ClippingPlane') ||
-            child.name.includes('BoundaryPoint')
+        console.log(`🔄 重新创建边界墙，scale: ${this.wallScale}`);
+
+        // 🔥 彻底清除现有的墙体（包括几何体和材质）
+        const boundaryWalls = this.modelGroup.children.filter(
+            child => child.name.includes('BoundaryWall') ||
+                     child.name.includes('ClippingPlane') ||
+                     child.name.includes('BoundaryPoint')
         );
+
         boundaryWalls.forEach(wall => {
+            // 递归清理所有子对象的几何体和材质
+            wall.traverse((child) => {
+                if (child instanceof THREE.Mesh) {
+                    if (child.geometry) {
+                        child.geometry.dispose();
+                    }
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(mat => mat.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                }
+            });
+
+            // 从模型组中移除
             this.modelGroup.remove(wall);
         });
 
-        console.log(`🔄 重新创建边界墙，scale: ${this.wallScale}`);
+        console.log(`✅ 已彻底清理现有墙体 (${boundaryWalls.length}个)`);
 
         // 重新创建边界墙
         const groundSize = getGroundFullSize();
         this.createBoundaryWalls(groundSize.x, groundSize.z, this.wallScale);
+
+        console.log(`✅ 边界墙重新创建完成`);
+
+        // 🔥 重要：通知需要重新生成统一BVH碰撞体
+        console.log('🔄 墙体已更新，需要重新生成统一BVH碰撞体');
+
+        // 触发重新生成BVH碰撞体的事件
+        // 延迟一点时间确保墙体完全创建完毕
+        setTimeout(() => {
+            console.log('🔧 重新生成统一BVH碰撞体...');
+            // 这里需要重新调用 setupBVHCollision 或类似的方法
+            // 由于我们在 WallAndDoor 类中，需要通过事件或回调来通知外部重新生成
+            window.dispatchEvent(new CustomEvent('wallsRecreated'));
+        }, 100);
     }
+
 }

@@ -1,43 +1,49 @@
 import * as THREE from 'three';
-import * as CANNON from 'cannon-es';
 import { OvalRunningTrack } from '../architecture/OvalRunningTrack';
 import { WallAndDoor } from '../architecture/WallAndDoor';
 import { SchoolBuilding } from '../architecture/SchoolBuilding';
+import { Ground } from '../architecture/Ground';
 import { BaseModel } from '../architecture/BaseModel';
-import { GlobalState } from '../../types/GlobalState';
-import { PhysicsManager } from './PhysicsManager';
+import { PHYSICS_CONSTANTS } from '../../constants/PhysicsConstants';
 
 /**
  * 对象管理器 - 统一管理所有静态模型对象
  */
 export class ObjectManager {
   private scene: THREE.Scene;
-  private physicsWorld: CANNON.World;
-  private globalState: GlobalState;
   private objects: Map<string, BaseModel> = new Map();
-  private physicsManager?: PhysicsManager;
+  private isCreated = false;
 
-  constructor(scene: THREE.Scene, globalState: GlobalState, physicsManager?: PhysicsManager) {
+  constructor(scene: THREE.Scene) {
     this.scene = scene;
-    this.globalState = globalState;
-    this.physicsWorld = globalState.physicsWorld!;
-    this.physicsManager = physicsManager;
+  }
 
-    this.createOvalTrack('main-track', {
-      position: { x: 0, y: 0, z: 100 },
+  async create(): Promise<void> {
+    if(this.isCreated) return
+
+    // 🔥 创建地面
+    await this.createGround('main-ground', {
+      sizeX: PHYSICS_CONSTANTS.GROUND_SIZE_X,
+      sizeZ: PHYSICS_CONSTANTS.GROUND_SIZE_Z,
+      position: { x: 0, y: 0, z: 0 }
+    });
+
+    await this.createOvalTrack('main-track', {
+      position: { x: 0, y: 2, z: 100 },
       rotation: { x: 0, y: 0, z: 0 },
       scale: 8 // 支持x、z轴独立缩放
     });
 
     // 创建学校建筑
-    this.createSchoolBuilding('school-building', {
-      position: { x: 0, y: 0, z: -200 },
+    await this.createSchoolBuilding('school-building', {
+      position: { x: 0, y: 0, z: -300 },
       rotation: { x: 0, y: 0, z: 0 },
       scale: 1
     });
 
     // 直接创建边界墙体
-    this.createBoundaryWalls();
+    await this.createBoundaryWalls();
+    this.isCreated = true;
   }
 
   /**
@@ -117,15 +123,70 @@ export class ObjectManager {
   async regenerateGroundAndWalls(): Promise<void> {
     console.log('🔄 开始重新生成地面和边界墙体...');
 
-    // 重新创建物理地面
-    if (this.physicsManager) {
-      this.physicsManager.recreateGround();
-    }
+    // 🔥 重新创建可视化地面
+    await this.recreateGround();
+
+    // 🔥 不再需要物理地面，因为已经移除了 PhysicsManager
 
     // 重新生成边界墙体
     await this.regenerateBoundaryWalls();
 
     console.log('✅ 地面和边界墙体重新生成完成');
+  }
+
+  /**
+   * 创建地面
+   */
+  async createGround(
+    id: string = 'main-ground',
+    options: {
+      sizeX?: number;
+      sizeZ?: number;
+      position?: { x: number; y: number; z: number };
+      rotation?: { x: number; y: number; z: number };
+      scale?: number;
+    } = {}
+  ): Promise<Ground> {
+    console.log(`🌍 创建地面: ${id}`);
+
+    // 创建地面实例
+    const ground = new Ground(this.scene, id, {
+      sizeX: options.sizeX || PHYSICS_CONSTANTS.GROUND_SIZE_X,
+      sizeZ: options.sizeZ || PHYSICS_CONSTANTS.GROUND_SIZE_Z,
+      position: options.position || { x: 0, y: 0, z: 0 },
+      rotation: options.rotation || { x: 0, y: 0, z: 0 },
+      scale: options.scale || 1
+    });
+
+    // 创建地面
+    await ground.create();
+
+    // 存储到对象集合中
+    this.objects.set(id, ground);
+
+    console.log(`✅ 地面创建完成: ${id}`);
+    return ground;
+  }
+
+  /**
+   * 重新创建地面
+   */
+  async recreateGround(): Promise<void> {
+    console.log('🔄 重新创建地面...');
+
+    // 移除现有地面
+    if (this.objects.has('main-ground')) {
+      this.removeObject('main-ground');
+    }
+
+    // 重新创建地面
+    await this.createGround('main-ground', {
+      sizeX: PHYSICS_CONSTANTS.GROUND_SIZE_X,
+      sizeZ: PHYSICS_CONSTANTS.GROUND_SIZE_Z,
+      position: { x: 0, y: 0, z: 0 }
+    });
+
+    console.log('✅ 地面重新创建完成');
   }
 
   /**
@@ -144,7 +205,7 @@ export class ObjectManager {
     // 设置默认参数
 
     // 创建跑道实例
-    const track = new OvalRunningTrack(this.scene, this.physicsWorld, {
+    const track = new OvalRunningTrack(this.scene, {
       position: options.position || { x: 0, y: 0, z: 0 },
       rotation: options.rotation || { x: 0, y: 0, z: 0 },
       scale: options.scale || 2
@@ -181,7 +242,7 @@ export class ObjectManager {
     };
 
     // 创建墙体实例
-    const wall = new WallAndDoor(this.scene, 14 ,this.physicsWorld, config);
+    const wall = new WallAndDoor(this.scene, 14, config);
 
     // 创建墙体
     await wall.create();
@@ -267,6 +328,20 @@ export class ObjectManager {
    */
   getMainSchoolBuilding(): SchoolBuilding | undefined {
     return this.getSchoolBuilding('school-building');
+  }
+
+  /**
+   * 获取地面
+   */
+  getGround(id: string): Ground | undefined {
+    return this.getObject<Ground>(id);
+  }
+
+  /**
+   * 获取主地面
+   */
+  getMainGround(): Ground | undefined {
+    return this.getGround('main-ground');
   }
 
   /**

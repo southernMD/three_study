@@ -16,7 +16,6 @@ export interface GymEquipmentConfig {
 
 // 便利函数
 import * as THREE from 'three';
-import * as CANNON from 'cannon-es';
 import { OnePullUpBar } from './OnePullUpBar';
 import { OutdoorGym } from './OutdoorGym';
 
@@ -26,7 +25,6 @@ import { OutdoorGym } from './OutdoorGym';
 export async function createGymEquipment(
   type: GymEquipmentType,
   scene: THREE.Scene,
-  physicsWorld?: CANNON.World,
   initialTransform?: {
     position?: { x: number; y: number; z: number } | THREE.Vector3;
     rotation?: { x: number; y: number; z: number } | THREE.Vector3;
@@ -36,9 +34,9 @@ export async function createGymEquipment(
   let equipment: OnePullUpBar | OutdoorGym;
 
   if (type === 'pullup') {
-    equipment = new OnePullUpBar(scene, physicsWorld, initialTransform);
+    equipment = new OnePullUpBar(scene, initialTransform);
   } else {
-    equipment = new OutdoorGym(scene, physicsWorld, initialTransform);
+    equipment = new OutdoorGym(scene, initialTransform);
   }
 
   await equipment.create();

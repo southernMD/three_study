@@ -34,10 +34,9 @@ export class SchoolBuilding extends BaseModel {
 
     constructor(
         scene: THREE.Scene,
-        physicsWorldOrTransform?: CANNON.World | InitialTransform,
         initialTransform?: InitialTransform
     ) {
-        super(scene, physicsWorldOrTransform as any, initialTransform as InitialTransform);
+        super(scene, initialTransform as InitialTransform);
     }
 
     /**

@@ -59,15 +59,21 @@ export class SceneManager {
   createRenderer(domElement: HTMLElement, width: number, height: number): THREE.WebGLRenderer {
     // 添加渲染器
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: false, // 关闭抗锯齿以提高性能
+      powerPreference: 'high-performance', // 优先使用高性能GPU
     });
-    // 设置屏幕像素比
-    this.renderer.setPixelRatio(window.devicePixelRatio);
+    // 设置屏幕像素比 - 降低像素比可以提高性能
+    this.renderer.setPixelRatio(Math.min(1.5, window.devicePixelRatio));
     this.renderer.setClearColor(0x888888);
     this.renderer.setSize(width, height);
-
-    // 启用本地裁剪平面
+    
+    // 性能优化设置
+    this.renderer.shadowMap.enabled = false; // 关闭阴影可以提高性能
     this.renderer.localClippingEnabled = true;
+    
+    // 启用物理正确的光照模型
+    this.renderer.physicallyCorrectLights = false;
+    
     domElement.appendChild(this.renderer.domElement);
     this.renderer.render(this.scene, this.camera);
     
@@ -93,17 +99,25 @@ export class SceneManager {
     // 主光源（白色，高强度）
     this.mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
     this.mainLight.position.set(10, 200, 100);
-    this.mainLight.castShadow = true; // 启用阴影
+    this.mainLight.castShadow = false; // 禁用阴影以提高性能
+    
+    // 优化阴影设置 - 如果需要阴影，可以使用这些设置
+    // this.mainLight.castShadow = true;
+    // this.mainLight.shadow.mapSize.width = 512; // 降低阴影贴图分辨率
+    // this.mainLight.shadow.mapSize.height = 512;
+    // this.mainLight.shadow.camera.near = 0.5;
+    // this.mainLight.shadow.camera.far = 500;
+    
     this.scene.add(this.mainLight);
 
     // 环境光（柔和补光）
-    this.ambientLight = new THREE.AmbientLight(0x404040);
+    this.ambientLight = new THREE.AmbientLight(0x404040, 0.8);
     this.scene.add(this.ambientLight);
 
-    // 保留原有点光源（可选）
-    this.pointLight = new THREE.PointLight(0xffffff, 0.5, 500);
-    this.pointLight.position.set(50, 50, 50);
-    this.scene.add(this.pointLight);
+    // 移除点光源以提高性能
+    // this.pointLight = new THREE.PointLight(0xffffff, 0.5, 500);
+    // this.pointLight.position.set(50, 50, 50);
+    // this.scene.add(this.pointLight);
   }
 
   /**

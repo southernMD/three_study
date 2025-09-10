@@ -3,8 +3,7 @@ import { MMDAnimationHelper } from "three/examples/jsm/animation/MMDAnimationHel
 import { MMDLoader } from "three/examples/jsm/loaders/MMDLoader.js";
 import { AnimationClip } from 'three/src/animation/AnimationClip.js';
 import { AnimationAction } from 'three/src/animation/AnimationAction.js';
-import { Capsule } from 'three/examples/jsm/math/Capsule.js';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
 import type { KeyframeTrack } from 'three';
 import { Model } from './Model';
 import { GlobalState } from '../types/GlobalState';
@@ -15,16 +14,74 @@ export class MMDModel extends Model {
   walkAction?: AnimationAction;
   standAction?: AnimationAction;
   private helper: MMDAnimationHelper | null = null;
-  
+
   constructor(globalState: GlobalState) {
     super(globalState);
     this.mesh = new THREE.SkinnedMesh();
+  }
+  update(): void {
+    // 更新动画
+    if (this.helper) {
+      this.helper.update(1/60);
+    }
+
+    // 更新动画混合器
+    if (this.mixer) {
+      this.mixer.update(1/60);
+    }
+  }
+
+  /**
+   * 切换辅助线可见性
+   */
+  toggleHelpers(): void {
+    if (this.helpersVisible) {
+      const { boxHelper } = this.helpersVisible;
+
+      // 获取当前状态（以包围盒为准）
+      const currentVisibility = boxHelper ? boxHelper.visible : false;
+      const newVisibility = !currentVisibility;
+
+      // 切换包围盒辅助线可见性
+      if (boxHelper) {
+        boxHelper.visible = newVisibility;
+        console.log(`包围盒辅助线: ${newVisibility ? '显示' : '隐藏'}`);
+      }
+
+      console.log(`人物辅助线显示状态: ${newVisibility ? '显示' : '隐藏'}`);
+    } else {
+      console.log('❌ 辅助器未初始化');
+    }
+  }
+
+  /**
+   * 设置辅助视觉效果
+   */
+  setupHelpers(scene: THREE.Scene, capsuleVisual: THREE.Mesh): void {
+    // 创建包围盒辅助线
+    const boxHelper = new THREE.BoxHelper(this.mesh, 0xffff00);
+    boxHelper.visible = true; // 默认显示
+
+    // 添加到场景
+    scene.add(boxHelper);
+
+    // 保存引用以便控制可见性
+    this.helpersVisible = {
+      boxHelper,
+      capsuleVisual
+    };
+
+    console.log('✅ 辅助器已创建:', {
+      boxHelper: !!boxHelper,
+      capsuleVisual: !!capsuleVisual,
+      boxHelperVisible: boxHelper.visible,
+      capsuleVisualVisible: capsuleVisual.visible
+    });
   }
 
   // 加载模型
   async load(scene: THREE.Scene, modelPath: string, walkAnimPath: string, standAnimPath: string): Promise<void> {
     const loader = new MMDLoader();
-    
     // 创建一个加载MMD模型的Promise
     const loadModel = (): Promise<THREE.SkinnedMesh> => {
       return new Promise((resolve, reject) => {
@@ -63,18 +120,26 @@ export class MMDModel extends Model {
       this.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
       this.mesh.position.set(0,0,0)
       this.setModelDimensions()
-      
-      // 创建胶囊体
-      const { playerCapsule,capsuleVisual } = this.createCapsule();
 
-      // 设置全局状态引用
-      this.playerCapsule = playerCapsule;
-      
-      // 创建物理身体
-      this.createPhysicsBody();
+      // 创建胶囊体碰撞检测 - 按照ModelBefore.ts
+      const { playerCapsule, capsuleVisual } = this.createCapsule();
 
-      // 添加辅助视觉效果
+      // 添加胶囊体可视化到场景
+      scene.add(capsuleVisual);
+      console.log('✅ 胶囊体已添加到场景:', {
+        name: capsuleVisual.name,
+        visible: capsuleVisual.visible,
+        position: capsuleVisual.position,
+        parent: capsuleVisual.parent?.type || 'Scene',
+        geometry: capsuleVisual.geometry.type,
+        material: Array.isArray(capsuleVisual.material) ? 'Array' : (capsuleVisual.material as THREE.Material).type
+      });
+
+      // 设置辅助器
       this.setupHelpers(scene, capsuleVisual);
+
+      // 更新胶囊体位置
+      this.updateCapsulePosition();
       
       // 创建动画混合器
       this.mixer = new THREE.AnimationMixer(this.mesh);
@@ -101,28 +166,7 @@ export class MMDModel extends Model {
       console.error('加载模型或动画时出错:', error);
     }
   }
-  // 设置辅助视觉效果 - 实现基类抽象方法
-  setupHelpers(scene: THREE.Scene, capsuleVisual: THREE.Mesh): void {
-    // 添加骨骼辅助线
-    const skeletonHelper = new THREE.SkeletonHelper(this.mesh);
-    skeletonHelper.visible = true;
-    scene.add(skeletonHelper);
-      
-    // 添加包围盒辅助线
-    const boxHelper = new THREE.BoxHelper(this.mesh, 0xffff00);
-    scene.add(boxHelper);
-      
-    scene.add(capsuleVisual);
 
-    // 初始化辅助线可见性对象（使用父类的私有属性）
-    this.helpersVisible = {
-      skeletonHelper: skeletonHelper,
-      boxHelper: boxHelper,
-      capsuleVisual: capsuleVisual
-    };
-
-    // 注意：updateModelHelpers方法现在在父类Model中定义
-  }
   
   // 更新动画
   updateAnimation(deltaTime: number): void {
@@ -162,10 +206,7 @@ export class MMDModel extends Model {
     this.stopWalking();
   }
   
-  resetPosition(): void {
-    this.mesh.position.set(0, 0, 0);
-    this.mesh.rotation.set(0, 0, 0);
-  }
+
 
   // 获取模型三维尺寸
   setModelDimensions(): { width: number; height: number; depth: number } {

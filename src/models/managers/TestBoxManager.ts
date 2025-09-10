@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
-import { PhysicsManager } from './PhysicsManager';
 
 /**
  * TestBoxManager类 - 专门管理测试方块的类
@@ -8,11 +7,9 @@ import { PhysicsManager } from './PhysicsManager';
  */
 export class TestBoxManager {
   private scene: THREE.Scene;
-  private physicsManager?: PhysicsManager;
 
-  constructor(scene: THREE.Scene, physicsManager?: PhysicsManager) {
+  constructor(scene: THREE.Scene) {
     this.scene = scene;
-    this.physicsManager = physicsManager;
   }
 
   /**

@@ -33,7 +33,55 @@ export class GLTFModel extends Model {
     this.mesh = new THREE.Object3D();
     this.mixer = new THREE.AnimationMixer(this.mesh);
   }
-  
+  update(): void {
+    // 更新动画混合器
+    if (this.mixer) {
+      this.mixer.update(1/60);
+    }
+  }
+
+  /**
+   * 切换辅助线可见性
+   */
+  toggleHelpers(): void {
+    if (this.helpersVisible) {
+      const { boxHelper, capsuleVisual } = this.helpersVisible;
+
+      // 获取当前状态（以胶囊体为准）
+      const currentVisibility = capsuleVisual ? capsuleVisual.visible : true;
+      const newVisibility = !currentVisibility;
+
+      // 切换包围盒辅助线可见性
+      if (boxHelper) {
+        boxHelper.visible = newVisibility;
+      }
+
+      // 切换胶囊体可见性
+      if (capsuleVisual) {
+        capsuleVisual.visible = newVisibility;
+      }
+
+      console.log(`人物辅助线显示状态: ${newVisibility ? '显示' : '隐藏'}`);
+    }
+  }
+
+  /**
+   * 设置辅助视觉效果
+   */
+  setupHelpers(scene: THREE.Scene, capsuleVisual: THREE.Mesh): void {
+    // 创建包围盒辅助线
+    const boxHelper = new THREE.BoxHelper(this.mesh, 0xffff00);
+
+    // 添加到场景
+    scene.add(boxHelper);
+
+    // 保存引用以便控制可见性
+    this.helpersVisible = {
+      boxHelper,
+      capsuleVisual
+    };
+  }
+
   // 加载GLTF模型
   async load(scene: THREE.Scene, modelPath: string): Promise<void> {
     try {
@@ -56,7 +104,7 @@ export class GLTFModel extends Model {
       const scaleXZ = Math.max(minWidth / meshSize.width, minWidth / meshSize.depth);
       const scaleFactor = Math.max(1, scaleXZ); // 至少保持原大小
       this.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
-      this.mesh.position.set(0,0,0)
+      this.mesh.position.set(0,2,0)
       this.setModelDimensions()
       
       // 创建混合器
@@ -68,30 +116,17 @@ export class GLTFModel extends Model {
       // 设置动画
       this.setupAnimations();
       
+      // 创建胶囊体碰撞检测 - 按照ModelBefore.ts
       const { playerCapsule, capsuleVisual } = this.createCapsule();
-      
-      // 设置全局状态引用
-      this.playerCapsule = playerCapsule;
-      
-      // 创建物理身体
-      this.createPhysicsBody();
 
-      // 验证物理体是否正确创建
-      setTimeout(() => {
-        const isValid = this.validatePhysicsBodyInWorld();
-        const bodyInfo = this.getPhysicsBodyInfo();
+      // 添加胶囊体可视化到场景
+      scene.add(capsuleVisual);
 
-        console.log('🔍 人物物理体信息:', bodyInfo);
-
-        if (isValid) {
-          console.log('✅ 人物物理体验证成功，可以与建筑物进行碰撞检测');
-        } else {
-          console.log('❌ 人物物理体验证失败，碰撞检测可能无法正常工作');
-        }
-      }, 50);
-
-      // 设置辅助视觉效果
+      // 设置辅助器
       this.setupHelpers(scene, capsuleVisual);
+
+      // 更新胶囊体位置
+      this.updateCapsulePosition();
       
       // 开始播放站立动画
       this.stopWalk();
@@ -132,23 +167,7 @@ export class GLTFModel extends Model {
   
 
   
-  // 设置辅助视觉效果
-  setupHelpers(scene: THREE.Scene, capsuleVisual: THREE.Mesh): void {
-    // 创建包围盒辅助线
-    const boxHelper = new THREE.BoxHelper(this.mesh, 0xffff00);
-    
-    // 添加到场景
-    scene.add(boxHelper);
-    scene.add(capsuleVisual);
-    
-    // 保存引用以便控制可见性（使用父类的私有属性）
-    this.helpersVisible = {
-      boxHelper,
-      capsuleVisual
-    };
 
-    // 注意：updateModelHelpers方法现在在父类Model中定义
-  }
   
   // 实现基类的抽象方法 - 开始行走
   startWalking(): void {
@@ -185,13 +204,7 @@ export class GLTFModel extends Model {
       this.standAction.play();
     }
   }
-  // 重置位置
-  resetPosition(): void {
-    super.resetPosition();
-    
-    // 停止行走动画，播放站立动画
-    this.stopWalk();
-  }
+
   // 获取模型三维尺寸
   setModelDimensions(): { width: number; height: number; depth: number } {
     if (!this.mesh) return { width: 0, height: 0, depth: 0 };
