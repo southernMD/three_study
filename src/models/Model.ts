@@ -279,8 +279,8 @@ export abstract class Model {
     // 更新模型矩阵
     this.mesh.updateMatrixWorld();
 
-    // 暂时禁用BVH碰撞检测，先修复NaN问题
-    this.performSingleColliderDetection(this.bvhPhysics.getCollider()!,delta);
+    // 使用新的分离碰撞体检测
+    this.performSeparateCollidersDetection(delta);
 
     // // 简单的地面检测
     // if (this.mesh.position.y < 0) {
@@ -369,7 +369,6 @@ export abstract class Model {
         this.keys.ArrowRight = true;
         break;
       case 'Space':
-        debugger
         this.keys.Space = true;
         // 🔥 参考 characterMovement.js 第164-172行：在 keydown 事件中立即处理跳跃
         if (this.playerIsOnGround) {
@@ -449,49 +448,168 @@ export abstract class Model {
   // ==================== BVH 物理系统方法 ====================
 
   /**
-   * 对单个碰撞体执行碰撞检测（严格按照 characterMovement.js 第351-435行）
+   * 对分离的碰撞体组执行碰撞检测
    */
-  private performSingleColliderDetection(collider: THREE.Mesh, delta: number): void {
-    if (!this.mesh || !this.playerCapsule || !this.capsuleParams || !collider) return;
-    // 临时变量 (对应characterMovement.js第32-35行)
+  private performSeparateCollidersDetection(delta: number): void {
+    if (!this.bvhPhysics) return;
+
+    const colliders = this.bvhPhysics.getColliders();
+    const colliderMapping = this.bvhPhysics.getColliderMapping();
+
+    // 如果没有分离的碰撞体，回退到单一碰撞体
+    if (colliders.size === 0) {
+      const singleCollider = this.bvhPhysics.getCollider();
+      if (singleCollider) {
+        debugger
+        this.performSingleColliderDetection(singleCollider, delta);
+      }
+      return;
+    }
+
+    if (!this.mesh || !this.playerCapsule || !this.capsuleParams) return;
+
+    // 临时变量
     const tempBox = new THREE.Box3();
     const tempMat = new THREE.Matrix4();
     const tempSegment = new THREE.Line3();
-
-    // adjust player position based on collisions (第351行注释)
     const capsuleInfo = this.capsuleParams;
 
-    tempBox.makeEmpty();
-    tempMat.copy(collider.matrixWorld).invert();
-
-    // 🔥 保存原始胶囊体位置（用于后续计算 deltaVector）
-    const originalCapsuleStart = this.playerCapsule.start.clone()
+    // 保存原始胶囊体位置
+    const originalCapsuleStart = this.playerCapsule.start.clone();
 
     // 从 Capsule 创建 Line3 segment
     tempSegment.start.copy(this.playerCapsule.start);
     tempSegment.end.copy(this.playerCapsule.end);
 
-    // tempSegment.start.copy(this.mesh.position.clone().add(new THREE.Vector3(0,this.capsuleParams.radius,0)));
-    // tempSegment.end.copy(this.mesh.position.clone().add(new THREE.Vector3(0,this.capsuleParams.radius + this.capsuleParams.height,0)));
-    // get the position of the capsule in the local space of the collider (第357-359行)
-    // 🔥 修复：playerCapsule 已经在世界空间，直接转换到碰撞体局部空间
+    let totalDeltaVector = new THREE.Vector3();
+    let hasCollision = false;
+    let collisionInfo: Array<{ objectId: string; object: any; deltaVector: THREE.Vector3 }> = [];
+
+    // 对每个分离的碰撞体进行检测
+    colliders.forEach((collider, objectId) => {
+      if (!collider.geometry || !(collider.geometry as any).boundsTree) return;
+
+      // 重置临时变量
+      tempBox.makeEmpty();
+      tempMat.copy(collider.matrixWorld).invert();
+
+      // 重置segment到原始位置
+      tempSegment.start.copy(this.playerCapsule!.start);
+      tempSegment.end.copy(this.playerCapsule!.end);
+
+      // 转换到碰撞体局部空间
+      tempSegment.start.applyMatrix4(tempMat);
+      tempSegment.end.applyMatrix4(tempMat);
+
+      // 计算包围盒
+      tempBox.expandByPoint(tempSegment.start);
+      tempBox.expandByPoint(tempSegment.end);
+      tempBox.min.addScalar(-capsuleInfo.radius);
+      tempBox.max.addScalar(capsuleInfo.radius);
+
+      let colliderHasCollision = false;
+
+      // BVH碰撞检测
+      (collider.geometry as any).boundsTree.shapecast({
+        intersectsBounds: (box: THREE.Box3) => box.intersectsBox(tempBox),
+
+        intersectsTriangle: (tri: any) => {
+          const triPoint = this.tempVector;
+          const capsulePoint = this.tempVector2;
+
+          const distance = tri.closestPointToSegment(tempSegment, triPoint, capsulePoint);
+          if (distance < capsuleInfo.radius) {
+            const depth = capsuleInfo.radius - distance;
+            const direction = capsulePoint.sub(triPoint).normalize();
+
+            tempSegment.start.addScaledVector(direction, depth);
+            tempSegment.end.addScaledVector(direction, depth);
+            colliderHasCollision = true;
+          }
+        }
+      });
+
+      if (colliderHasCollision) {
+        // 计算该碰撞体的位置调整
+        const newPosition = this.tempVector;
+        newPosition.copy(tempSegment.start).applyMatrix4(collider.matrixWorld);
+
+        const deltaVector = new THREE.Vector3();
+        deltaVector.subVectors(newPosition, originalCapsuleStart);
+
+        // 累积位置调整
+        totalDeltaVector.add(deltaVector);
+        hasCollision = true;
+
+        // 记录碰撞信息
+        collisionInfo.push({
+          objectId: objectId,
+          object: colliderMapping.get(objectId),
+          deltaVector: deltaVector.clone()
+        });
+
+        console.log(`🎯 角色碰撞: ${objectId}`, {
+          objectName: colliderMapping.get(objectId)?.constructor.name || 'Unknown',
+          deltaVector: deltaVector
+        });
+      }
+    });
+
+    if (hasCollision) {
+      // 处理累积的碰撞结果
+      const wasOnGround = this.playerIsOnGround;
+      this.playerIsOnGround = totalDeltaVector.y > Math.abs(delta * this.playerVelocity.y * 0.25);
+
+      const offset = Math.max(0.0, totalDeltaVector.length() - 1e-5);
+      totalDeltaVector.normalize().multiplyScalar(offset);
+
+      // 调整角色位置
+      this.mesh.position.add(totalDeltaVector);
+
+      if (!this.playerIsOnGround) {
+        totalDeltaVector.normalize();
+        this.playerVelocity.addScaledVector(totalDeltaVector, -totalDeltaVector.dot(this.playerVelocity));
+      } else {
+        this.playerVelocity.set(0, 0, 0);
+      }
+
+      // 触发角色碰撞事件
+      this.onPlayerCollision(collisionInfo);
+    }
+  }
+
+  /**
+   * 对单个碰撞体执行碰撞检测（回退方法）
+   */
+  private performSingleColliderDetection(collider: THREE.Mesh, delta: number): void {
+    if (!this.mesh || !this.playerCapsule || !this.capsuleParams || !collider) return;
+
+    const tempBox = new THREE.Box3();
+    const tempMat = new THREE.Matrix4();
+    const tempSegment = new THREE.Line3();
+    const capsuleInfo = this.capsuleParams;
+
+    tempBox.makeEmpty();
+    tempMat.copy(collider.matrixWorld).invert();
+
+    const originalCapsuleStart = this.playerCapsule.start.clone()
+
+    tempSegment.start.copy(this.playerCapsule.start);
+    tempSegment.end.copy(this.playerCapsule.end);
+
     tempSegment.start.applyMatrix4(tempMat);
     tempSegment.end.applyMatrix4(tempMat);
 
-    // get the axis aligned bounding box of the capsule (第361-366行)
     tempBox.expandByPoint(tempSegment.start);
     tempBox.expandByPoint(tempSegment.end);
 
     tempBox.min.addScalar(-capsuleInfo.radius);
     tempBox.max.addScalar(capsuleInfo.radius);
 
-    // BVH碰撞检测 (第368-392行) - 完全按照 characterMovement.js
     (collider.geometry as any).boundsTree.shapecast({
       intersectsBounds: (box: THREE.Box3) => box.intersectsBox(tempBox),
 
       intersectsTriangle: (tri: any) => {
-        // check if the triangle is intersecting the capsule and adjust the
-        // capsule position if it is. (第372-375行注释)
         const triPoint = this.tempVector;
         const capsulePoint = this.tempVector2;
 
@@ -505,30 +623,18 @@ export abstract class Model {
         }
       }
     });
-    // get the adjusted position of the capsule collider in world space after checking
-    // triangle collisions and moving it. capsuleInfo.segment.start is assumed to be
-    // the origin of the player model. (第394-398行注释)
+
     const newPosition = this.tempVector;
-    // 🔥 修复：将调整后的 tempSegment.start 转换回世界空间
     newPosition.copy(tempSegment.start).applyMatrix4(collider.matrixWorld)
 
-    // check how much the collider was moved (第400-402行)
     const deltaVector = this.tempVector2;
     deltaVector.subVectors(newPosition, originalCapsuleStart);
 
-    // if the player was primarily adjusted vertically we assume it's on something we should consider ground (第404-405行)
     const wasOnGround = this.playerIsOnGround;
     this.playerIsOnGround = deltaVector.y > Math.abs(delta * this.playerVelocity.y * 0.25);
 
-    // 调试信息
-    // if (wasOnGround !== this.playerIsOnGround || Math.abs(this.playerVelocity.y) > 5) {
-      console.log(`🔄 地面状态: ${wasOnGround} -> ${this.playerIsOnGround}, deltaVector.y: ${deltaVector.y.toFixed(3)}, threshold: ${Math.abs(delta * this.playerVelocity.y * 0.25).toFixed(3)}, velocity.y: ${this.playerVelocity.y.toFixed(3)}`);
-    // }
-
     const offset = Math.max(0.0, deltaVector.length() - 1e-5);
     deltaVector.normalize().multiplyScalar(offset);
-
-    // adjust the player model (第410-411行)
 
     this.mesh.position.add(deltaVector);
 
@@ -538,6 +644,22 @@ export abstract class Model {
     } else {
       this.playerVelocity.set(0, 0, 0);
     }
+  }
+
+  /**
+   * 角色碰撞事件处理
+   */
+  private onPlayerCollision(collisionInfo: Array<{ objectId: string; object: any; deltaVector: THREE.Vector3 }>): void {
+    // 这里可以添加角色碰撞的特殊逻辑
+    // 比如：触发机关、收集物品、受到伤害等
+
+    collisionInfo.forEach(info => {
+      console.log(`🚶 角色碰撞事件:`, {
+        objectId: info.objectId,
+        objectName: info.object?.constructor.name || 'Unknown',
+        deltaVector: info.deltaVector
+      });
+    });
   }
 
 
@@ -875,8 +997,15 @@ export abstract class Model {
   public updateProjectileSpheres(delta: number, scene: THREE.Scene): void {
     if (!this.bvhPhysics) return;
 
-    const collider = this.bvhPhysics.getCollider();
-    if (!collider) return;
+    // 获取分离的碰撞体组
+    const colliders = this.bvhPhysics.getColliders();
+    const colliderMapping = this.bvhPhysics.getColliderMapping();
+
+    // 如果没有分离的碰撞体，回退到统一碰撞体
+    if (colliders.size === 0) {
+      this.updateProjectileSpheresWithSingleCollider(delta, scene);
+      return;
+    }
 
     // 从BVH物理系统获取重力参数
     const gravity = this.bvhPhysics.params.gravity;
@@ -905,35 +1034,46 @@ export abstract class Model {
         continue;
       }
 
-      // BVH碰撞检测（参考physics.js的实现）
+      // 对每个分离的碰撞体进行碰撞检测
       tempSphere.copy(sphereCollider);
       let collided = false;
+      let collisionInfo: { objectId: string; object: any } | undefined = undefined;
 
-      if (collider.geometry && (collider.geometry as any).boundsTree) {
-        (collider.geometry as any).boundsTree.shapecast({
-          intersectsBounds: (box: THREE.Box3) => {
-            return box.intersectsSphere(tempSphere);
-          },
+      colliders.forEach((collider, objectId) => {
+        if (collided) return; // 如果已经碰撞，跳过其他检测
 
-          intersectsTriangle: (tri: any) => {
-            // 获取最近点和距离
-            tri.closestPointToPoint(tempSphere.center, deltaVec);
-            deltaVec.sub(tempSphere.center);
-            const distance = deltaVec.length();
+        if (collider.geometry && (collider.geometry as any).boundsTree) {
+          (collider.geometry as any).boundsTree.shapecast({
+            intersectsBounds: (box: THREE.Box3) => {
+              return box.intersectsSphere(tempSphere);
+            },
 
-            if (distance < tempSphere.radius) {
-              // 移动小球位置到三角形外部
-              const radius = tempSphere.radius;
-              const depth = distance - radius;
-              deltaVec.multiplyScalar(1 / distance);
-              tempSphere.center.addScaledVector(deltaVec, depth);
-              collided = true;
+            intersectsTriangle: (tri: any) => {
+              // 获取最近点和距离
+              tri.closestPointToPoint(tempSphere.center, deltaVec);
+              deltaVec.sub(tempSphere.center);
+              const distance = deltaVec.length();
+
+              if (distance < tempSphere.radius) {
+                // 移动小球位置到三角形外部
+                const radius = tempSphere.radius;
+                const depth = distance - radius;
+                deltaVec.multiplyScalar(1 / distance);
+                tempSphere.center.addScaledVector(deltaVec, depth);
+                collided = true;
+
+                // 记录碰撞信息
+                collisionInfo = {
+                  objectId: objectId,
+                  object: colliderMapping.get(objectId)
+                };
+              }
             }
-          }
-        });
-      }
+          });
+        }
+      });
 
-      if (collided) {
+      if (collided && collisionInfo) {
         // 反射速度
         deltaVec.subVectors(tempSphere.center, sphereCollider.center).normalize();
         velocity.reflect(deltaVec);
@@ -946,8 +1086,107 @@ export abstract class Model {
         // 更新位置
         sphereCollider.center.copy(tempSphere.center);
         sphere.position.copy(sphereCollider.center);
+
+        // 触发碰撞事件（可选）
+        if (collisionInfo) {
+          this.onSphereCollision(sphere, collisionInfo.objectId, collisionInfo.object);
+        }
       }
     }
+  }
+
+  /**
+   * 回退方法：使用统一碰撞体进行碰撞检测
+   */
+  private updateProjectileSpheresWithSingleCollider(delta: number, scene: THREE.Scene): void {
+    const collider = this.bvhPhysics!.getCollider();
+    if (!collider) return;
+
+    // 从BVH物理系统获取重力参数
+    const gravity = this.bvhPhysics!.params.gravity;
+
+    // 临时变量用于碰撞检测
+    const tempSphere = new THREE.Sphere();
+    const deltaVec = new THREE.Vector3();
+
+    for (let i = this.spheres.length - 1; i >= 0; i--) {
+      const sphere = this.spheres[i];
+      const velocity = sphere.userData.velocity as THREE.Vector3;
+      const sphereCollider = sphere.userData.collider as THREE.Sphere;
+
+      if (!velocity || !sphereCollider) continue;
+
+      // 应用重力
+      velocity.y += gravity * delta;
+
+      // 更新位置
+      sphereCollider.center.addScaledVector(velocity, delta);
+      sphere.position.copy(sphereCollider.center);
+
+      // 检查是否掉出世界
+      if (sphere.position.y < -80) {
+        this.removeSphere(i, scene);
+        continue;
+      }
+
+      // BVH碰撞检测
+      tempSphere.copy(sphereCollider);
+      let collided = false;
+
+      if (collider.geometry && (collider.geometry as any).boundsTree) {
+        (collider.geometry as any).boundsTree.shapecast({
+          intersectsBounds: (box: THREE.Box3) => {
+            return box.intersectsSphere(tempSphere);
+          },
+
+          intersectsTriangle: (tri: any) => {
+            tri.closestPointToPoint(tempSphere.center, deltaVec);
+            deltaVec.sub(tempSphere.center);
+            const distance = deltaVec.length();
+
+            if (distance < tempSphere.radius) {
+              const radius = tempSphere.radius;
+              const depth = distance - radius;
+              deltaVec.multiplyScalar(1 / distance);
+              tempSphere.center.addScaledVector(deltaVec, depth);
+              collided = true;
+            }
+          }
+        });
+      }
+
+      if (collided) {
+        deltaVec.subVectors(tempSphere.center, sphereCollider.center).normalize();
+        velocity.reflect(deltaVec);
+
+        const dot = velocity.dot(deltaVec);
+        velocity.addScaledVector(deltaVec, -dot * 0.5);
+        velocity.multiplyScalar(Math.max(1.0 - delta, 0));
+
+        sphereCollider.center.copy(tempSphere.center);
+        sphere.position.copy(sphereCollider.center);
+      }
+    }
+  }
+
+  /**
+   * 小球碰撞事件处理（可扩展）
+   * @param sphere 碰撞的小球
+   * @param objectId 碰撞对象的ID
+   * @param object 碰撞的对象
+   */
+  private onSphereCollision(sphere: THREE.Mesh, objectId: string, object: any): void {
+    console.log(`🎯 小球碰撞事件:`, {
+      spherePosition: sphere.position,
+      objectId: objectId,
+      objectName: object?.name || 'Unknown'
+    });
+
+    // 这里可以添加更多碰撞效果，比如：
+    // - 粒子效果
+    // - 声音效果
+    // - 对象交互
+    // - 分数计算等
   }
 
   /**

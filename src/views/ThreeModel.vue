@@ -105,6 +105,40 @@ const guiFn = {
     }
     return 0;
   },
+  // 显示碰撞体信息
+  showColliderInfo: () => {
+    const bvhPhysics = globalState.bvhPhysics;
+    if (!bvhPhysics) {
+      console.log('❌ BVH物理系统未初始化');
+      return;
+    }
+
+    const colliders = bvhPhysics.getColliders();
+    const mapping = bvhPhysics.getColliderMapping();
+
+    console.log('🔍 碰撞体信息:');
+    console.log(`  分离碰撞体数量: ${colliders.size}`);
+
+    if (colliders.size > 0) {
+      console.log('  碰撞体列表:');
+      colliders.forEach((collider, objectId) => {
+        const object = mapping.get(objectId);
+        console.log(`    - ID: ${objectId}`);
+        console.log(`      名称: ${collider.name}`);
+        console.log(`      对象: ${object?.name || 'Unknown'}`);
+        console.log(`      顶点数: ${collider.geometry.attributes.position?.count || 0}`);
+      });
+    } else {
+      const unifiedCollider = bvhPhysics.getCollider();
+      if (unifiedCollider) {
+        console.log('  使用统一碰撞体:');
+        console.log(`    名称: ${unifiedCollider.name}`);
+        console.log(`    顶点数: ${unifiedCollider.geometry.attributes.position?.count || 0}`);
+      } else {
+        console.log('  没有可用的碰撞体');
+      }
+    }
+  },
   // 演示在当前位置创建一个碰撞箱
   createBoxHere: () => {
     mmdModelManager.createBoxHere((color, position) => {
@@ -379,6 +413,7 @@ gui.add(guiFn, 'checkPhysicsSync').name('检查物理同步')
 const sphereFolder = gui.addFolder('小球发射功能')
 sphereFolder.add(guiFn, 'clearSpheres').name('清理所有小球')
 sphereFolder.add(guiFn, 'getSphereCount').name('显示小球数量')
+sphereFolder.add(guiFn, 'showColliderInfo').name('显示碰撞体信息')
 sphereFolder.add({ info: '右键点击屏幕发射小球' }, 'info').name('使用说明').listen()
 sphereFolder.open()
 
@@ -845,7 +880,7 @@ function handleKeyUp(event: KeyboardEvent) {
 
 // 🔥 新的统一BVH碰撞检测设置
 function setupBVHCollision() {
-  console.log('🔧 设置统一BVH碰撞检测...');
+  console.log('🔧 设置BVH碰撞检测...');
 
   // 获取人物模型
   const model = mmdModelManager?.getModel();
@@ -861,18 +896,30 @@ function setupBVHCollision() {
     return;
   }
 
-  // 🔥 核心：使用新的统一方法创建场景碰撞体
-  // 这会自动扫描场景中所有对象（排除人物模型）并创建统一的BVH碰撞体
-  console.log('🌍 开始创建统一场景碰撞体...');
-  const sceneCollider = bvhPhysics.createSceneCollider(objectManager.getAllObjects());
+  // 🔥 新功能：创建分离的碰撞体组
+  console.log('🌍 开始创建分离碰撞体组...');
+  const separateColliders = bvhPhysics.createSeparateColliders(objectManager.getAllObjects());
 
-  if (sceneCollider) {
-    console.log('✅ 统一场景碰撞体创建成功');
+  if (separateColliders.size > 0) {
+    console.log(`✅ 分离碰撞体组创建成功! 数量: ${separateColliders.size}`);
+
+    // 打印每个碰撞体的信息
+    separateColliders.forEach((collider, objectId) => {
+      console.log(`  - ${objectId}: ${collider.name}`);
+    });
   } else {
-    console.log('❌ 统一场景碰撞体创建失败');
+    console.log('⚠️ 分离碰撞体组创建失败，回退到统一碰撞体...');
+
+    // 回退到统一碰撞体
+    const sceneCollider = bvhPhysics.createSceneCollider(objectManager.getAllObjects());
+    if (sceneCollider) {
+      console.log('✅ 统一场景碰撞体创建成功');
+    } else {
+      console.log('❌ 统一场景碰撞体创建失败');
+    }
   }
 
-  console.log('🎯 统一BVH碰撞检测设置完成');
+  console.log('🎯 BVH碰撞检测设置完成');
 }
 
 </script>
