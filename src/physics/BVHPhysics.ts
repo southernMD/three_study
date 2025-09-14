@@ -67,7 +67,11 @@ export class BVHPhysics {
     staticGenerator.attributes = ['position'];
 
     const mergedGeometry = staticGenerator.generate();
-    mergedGeometry.boundsTree = new MeshBVH(mergedGeometry);
+    mergedGeometry.boundsTree = new MeshBVH(mergedGeometry,{
+      maxDepth: 40,           // 降低最大深度
+      maxLeafTris: 10,        // 减少叶子节点三角形数量
+      verbose: true           // 查看构建信息
+    });
 
     // 创建统一的碰撞体
     const sceneCollider = new THREE.Mesh(mergedGeometry);

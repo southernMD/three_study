@@ -84,6 +84,27 @@ const guiFn = {
   forceStand: () => {
     mmdModelManager.forceStand();
   },
+  // 清理所有发射的小球
+  clearSpheres: () => {
+    if (mmdModelManager && mmdModelManager.isModelLoaded()) {
+      const model = mmdModelManager.getModel();
+      if (model) {
+        model.clearAllSpheres(scene);
+      }
+    }
+  },
+  // 获取当前小球数量
+  getSphereCount: () => {
+    if (mmdModelManager && mmdModelManager.isModelLoaded()) {
+      const model = mmdModelManager.getModel();
+      if (model) {
+        const count = model.getSphereCount();
+        console.log(`当前小球数量: ${count}`);
+        return count;
+      }
+    }
+    return 0;
+  },
   // 演示在当前位置创建一个碰撞箱
   createBoxHere: () => {
     mmdModelManager.createBoxHere((color, position) => {
@@ -353,6 +374,13 @@ gui.add(guiFn, 'createFallingBoxesNow').name('创建掉落的盒子')
 gui.add(guiFn, 'showPhysicsInfo').name('显示物理信息')
 gui.add(guiFn, 'checkCollisionStatus').name('检查碰撞状态')
 gui.add(guiFn, 'checkPhysicsSync').name('检查物理同步')
+
+// 小球发射功能
+const sphereFolder = gui.addFolder('小球发射功能')
+sphereFolder.add(guiFn, 'clearSpheres').name('清理所有小球')
+sphereFolder.add(guiFn, 'getSphereCount').name('显示小球数量')
+sphereFolder.add({ info: '右键点击屏幕发射小球' }, 'info').name('使用说明').listen()
+sphereFolder.open()
 
 
 // 对象管理器控制
@@ -631,6 +659,42 @@ onMounted(async () => {
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
 
+    // 添加右键发射小球事件监听器
+    let mouseDownPosition = { x: 0, y: 0 };
+
+    renderer.domElement.addEventListener('mousedown', (event: MouseEvent) => {
+      if (event.button === 2) { // 右键
+        mouseDownPosition.x = event.clientX;
+        mouseDownPosition.y = event.clientY;
+      }
+    });
+
+    renderer.domElement.addEventListener('mouseup', (event: MouseEvent) => {
+      if (event.button === 2) { // 右键抬起
+        // 检查是否是点击（而不是拖拽）
+        const totalDelta = Math.abs(event.clientX - mouseDownPosition.x) +
+                          Math.abs(event.clientY - mouseDownPosition.y);
+        if (totalDelta > 2) return;
+
+        // 计算鼠标在标准化设备坐标中的位置
+        const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+        const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+
+        // 发射小球
+        if (mmdModelManager && mmdModelManager.isModelLoaded()) {
+          const model = mmdModelManager.getModel();
+          if (model && hadRenderCamera) {
+            model.shootSphere(hadRenderCamera, scene, mouseX, mouseY);
+          }
+        }
+      }
+    });
+
+    // 阻止右键菜单
+    renderer.domElement.addEventListener('contextmenu', (event: MouseEvent) => {
+      event.preventDefault();
+    });
+
     // 创建性能监视器
     const stats = new Stats();
     document.body.appendChild(stats.dom);
@@ -652,6 +716,14 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
   window.removeEventListener('keyup', handleKeyUp);
 
+  // 清理小球资源
+  if (mmdModelManager && mmdModelManager.isModelLoaded()) {
+    const model = mmdModelManager.getModel();
+    if (model) {
+      model.disposeSphereShooter(scene);
+    }
+  }
+
   // 清理所有管理器资源
   if (mmdModelManager) {
     mmdModelManager.cleanup();
@@ -662,7 +734,7 @@ onUnmounted(() => {
   if (sceneManager) {
     sceneManager.cleanup();
   }
-  
+
   // 清理性能监视器
   if (window.statsMonitor && window.statsMonitor.dom && window.statsMonitor.dom.parentNode) {
     window.statsMonitor.dom.parentNode.removeChild(window.statsMonitor.dom);
@@ -716,6 +788,10 @@ function animate(timestamp?: number) {
     if (model) {
       // 使用BVH物理系统更新模型
       model.updateMovement();
+
+      // 更新发射的小球物理
+      model.updateProjectileSpheres(1/120, scene);
+
       // 只在需要调试时才更新辅助器（包围盒、胶囊体等）
       // 注释掉这些行可以提高性能
       // model.updateModelHelpers();
