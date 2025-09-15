@@ -284,7 +284,6 @@ export class ObjectManager {
     );
 
     await building.create();
-
     this.objects.set(id, building);
     console.log(`✅ 学校建筑创建完成: ${id}`);
     return building;

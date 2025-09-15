@@ -1583,6 +1583,11 @@ three-mesh-bvh@^0.9.0:
   resolved "https://registry.npmmirror.com/three-mesh-bvh/-/three-mesh-bvh-0.9.0.tgz#7642b08e089d58c484491203013a867a9619678d"
   integrity sha512-xAwZj0hZknpwVsdK5BBJTIAZDjDPZCRzURY1o+z/JHBON/jc2UetK1CzPeQZiiOVSfI4jV2z7sXnnGtgsgnjaA==
 
+three-mesh-ui@^6.5.4:
+  version "6.5.4"
+  resolved "https://registry.yarnpkg.com/three-mesh-ui/-/three-mesh-ui-6.5.4.tgz#68f0a5aba4dced0ed168d2574f45d93b55f4fd03"
+  integrity sha512-QA2KlHrbj7zGjKqpNXcwvini8g5gOXb44ExdupVpxCqmHln/sWNGOmN0yIa/HjnMGYJWP4M+NchTHvwUp+MWIw==
+
 three@^0.170.0:
   version "0.170.0"
   resolved "https://registry.npmmirror.com/three/-/three-0.170.0.tgz#6087f97aab79e9e9312f9c89fcef6808642dfbb7"

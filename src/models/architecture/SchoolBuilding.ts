@@ -65,14 +65,26 @@ export class SchoolBuilding extends BaseModel {
             this.buildingObject = gltf.scene.clone();
             this.buildingObject.name = 'SchoolBuilding';
             this.buildingObject.scale.setScalar(this.buildingScale);
+            this.findDoor(this.buildingObject.children)
+
             this.modelGroup.add(this.buildingObject);
             this.addToScene();
-
             console.log('✅ 学校建筑模型加载完成');
 
         } catch (error) {
             console.error('❌ 学校建筑模型加载失败:', error);
         }
+    }
+
+    findDoor(children: THREE.Object3D[]) {
+        let i = 0; 
+        children.forEach((child)=>{
+            if(child.name.startsWith('G')){
+                debugger
+                i++
+            }
+        })
+        console.log(i);
     }
 
     public dispose(): void {
