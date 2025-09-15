@@ -824,8 +824,8 @@ function animate(timestamp?: number) {
       // 使用BVH物理系统更新模型
       model.updateMovement();
 
-      // 更新发射的小球物理
-      model.updateProjectileSpheres(1/120);
+      // 更新发射的小球物理（传递相机进行视野优化）
+      model.updateProjectileSpheres(1/120, hadRenderCamera);
 
       // 只在需要调试时才更新辅助器（包围盒、胶囊体等）
       // 注释掉这些行可以提高性能

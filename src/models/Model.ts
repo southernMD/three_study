@@ -537,10 +537,10 @@ export abstract class Model {
           deltaVector: deltaVector.clone()
         });
 
-        console.log(`🎯 角色碰撞: ${objectId}`, {
-          objectName: colliderMapping.get(objectId)?.constructor.name || 'Unknown',
-          deltaVector: deltaVector
-        });
+        // console.log(`🎯 角色碰撞: ${objectId}`, {
+        //   objectName: colliderMapping.get(objectId)?.constructor.name || 'Unknown',
+        //   deltaVector: deltaVector
+        // });
       }
     });
 
@@ -643,11 +643,11 @@ export abstract class Model {
     // 比如：触发机关、收集物品、受到伤害等
 
     collisionInfo.forEach(info => {
-      console.log(`🚶 角色碰撞事件:`, {
-        objectId: info.objectId,
-        objectName: info.object?.constructor.name || 'Unknown',
-        deltaVector: info.deltaVector
-      });
+      // console.log(`🚶 角色碰撞事件:`, {
+      //   objectId: info.objectId,
+      //   objectName: info.object?.constructor.name || 'Unknown',
+      //   deltaVector: info.deltaVector
+      // });
     });
   }
 
@@ -910,14 +910,14 @@ export abstract class Model {
   /**
    * 更新所有发射的小球物理状态
    * @param delta 时间增量
-   * @param scene 场景对象
+   * @param camera 相机对象（用于视野检测优化）
    */
-  public updateProjectileSpheres(delta: number): void {
+  public updateProjectileSpheres(delta: number, camera?: THREE.Camera): void {
     if (!this.bvhPhysics) return;
 
     for (let i = 0; i < this.spheres.length; i++) {
       const ball = this.spheres[i];
-      ball.updateProjectileSphere(delta);
+      ball.updateProjectileSphere(delta, camera);
     }
   }
 

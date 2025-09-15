@@ -84,22 +84,10 @@ export class Ball {
     /**
      * 更新所有发射的小球物理状态
      * @param delta 时间增量
-     * @param scene 场景对象
+     * @param camera 相机对象（用于视野检测）
      */
-    public updateProjectileSphere(delta: number): void {
+    public updateProjectileSphere(delta: number, camera?: THREE.Camera): void {
         if (!this.bvhPhysics) return;
-
-
-        // 获取分离的碰撞体组
-        const colliders = this.bvhPhysics.getColliders();
-        const colliderMapping = this.bvhPhysics.getColliderMapping();
-
-        // 从BVH物理系统获取重力参数
-        const gravity = this.bvhPhysics.params.gravity;
-
-        // 临时变量用于碰撞检测
-        const tempSphere = new THREE.Sphere();
-        const deltaVec = new THREE.Vector3();
 
         const sphere = this.sphere
         const velocity = sphere.userData.velocity as THREE.Vector3;
@@ -108,6 +96,7 @@ export class Ball {
         if (!velocity || !sphereCollider) return;
 
         // 应用重力（从BVH物理系统获取）
+        const gravity = this.bvhPhysics.params.gravity;
         velocity.y += gravity * delta;
 
         // 更新位置
@@ -119,6 +108,21 @@ export class Ball {
             this.removeSphere();
             return;
         }
+
+        // 性能优化：只对在相机视野内的小球进行碰撞检测
+        if (camera && !this.isInCameraView(camera)) {
+            console.log("不在视野内，跳过碰撞检测");
+            return; // 不在视野内，跳过碰撞检测
+        }
+        console.log("在视野内，碰撞检测");
+
+        // 获取分离的碰撞体组
+        const colliders = this.bvhPhysics.getColliders();
+        const colliderMapping = this.bvhPhysics.getColliderMapping();
+
+        // 临时变量用于碰撞检测
+        const tempSphere = new THREE.Sphere();
+        const deltaVec = new THREE.Vector3();
 
         // 对每个分离的碰撞体进行碰撞检测
         tempSphere.copy(sphereCollider);
@@ -186,9 +190,28 @@ export class Ball {
     }
 
     /**
-     * 移除指定索引的小球
-     * @param index 小球索引
-     * @param scene 场景对象
+     * 检查小球是否在相机视野范围内
+     * @param camera 相机对象
+     * @returns 是否在视野内
+     */
+    private isInCameraView(camera: THREE.Camera): boolean {
+        // 创建视锥体
+        const frustum = new THREE.Frustum();
+        const matrix = new THREE.Matrix4();
+
+        // 计算相机的投影视图矩阵
+        matrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        frustum.setFromProjectionMatrix(matrix);
+
+        // 创建小球的包围球
+        const boundingSphere = new THREE.Sphere(this.sphere.position, 40); // 小球半径为40
+
+        // 检查包围球是否与视锥体相交
+        return frustum.intersectsSphere(boundingSphere);
+    }
+
+    /**
+     * 移除小球
      */
     private removeSphere(): void {
         this.scene.remove(this.sphere);
@@ -204,11 +227,11 @@ export class Ball {
      * @param object 碰撞的对象
      */
     private onSphereCollision(sphere: THREE.Mesh, objectId: string, object: any): void {
-        console.log(`🎯 小球碰撞事件:`, {
-            spherePosition: sphere.position,
-            objectId: objectId,
-            objectName: object?.name || 'Unknown'
-        });
+        // console.log(`🎯 小球碰撞事件:`, {
+        //     spherePosition: sphere.position,
+        //     objectId: objectId,
+        //     objectName: object?.name || 'Unknown'
+        // });
 
         // 这里可以添加更多碰撞效果，比如：
         // - 粒子效果
