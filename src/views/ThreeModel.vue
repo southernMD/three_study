@@ -825,7 +825,7 @@ function animate(timestamp?: number) {
       model.updateMovement();
 
       // 更新发射的小球物理
-      model.updateProjectileSpheres(1/120, scene);
+      model.updateProjectileSpheres(1/120);
 
       // 只在需要调试时才更新辅助器（包围盒、胶囊体等）
       // 注释掉这些行可以提高性能

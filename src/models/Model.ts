@@ -3,6 +3,7 @@ import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GlobalState } from '../types/GlobalState';
 import { BVHPhysics } from '../physics/BVHPhysics';
+import { Ball } from './Ball';
 
 // 基础模型类 - 完全基于BVH物理系统
 export abstract class Model {
@@ -69,7 +70,7 @@ export abstract class Model {
   private tempVector2 = new THREE.Vector3();
 
   // 右键发射小球功能相关
-  private spheres: THREE.Mesh[] = [];
+  private spheres: Ball[] = [];
   private sphereParams = {
     sphereSize: 1,
     maxSpheres: 50 // 最大小球数量，防止内存泄漏
@@ -431,18 +432,6 @@ export abstract class Model {
    */
   updateMovement(): void {
     this.handleBVHPhysics(this.delta);
-  }
-
-  /**
-   * 更新所有物理系统（包括角色和发射的小球）
-   * @param scene 场景对象
-   */
-  public updateAllPhysics(scene: THREE.Scene): void {
-    // 更新角色物理
-    this.updateMovement();
-
-    // 更新发射的小球物理
-    this.updateProjectileSpheres(this.delta, scene);
   }
 
   // ==================== BVH 物理系统方法 ====================
@@ -913,80 +902,9 @@ export abstract class Model {
       console.warn('❌ BVH物理系统未初始化，无法发射小球');
       return;
     }
-
-    // 创建射线投射器
-    const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2(mouseX, mouseY);
-    raycaster.setFromCamera(mouse, camera);
-
-    // 创建小球
-    const sphere = this.createProjectileSphere(scene);
-
-    // 设置小球位置（从相机位置稍微向前）
-    sphere.position.copy(camera.position).addScaledVector(raycaster.ray.direction, 3);
-
-    // 设置小球速度
-    const velocity = new THREE.Vector3()
-      .set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5)
-      .addScaledVector(raycaster.ray.direction, 10 * Math.random() + 15)
-      .multiplyScalar(50);
-
-    // 将速度存储在小球的userData中
-    sphere.userData.velocity = velocity;
-    sphere.userData.mass = Math.pow(sphere.scale.x, 3) * Math.PI * 4 / 3;
-
-    console.log('🚀 发射小球:', {
-      position: sphere.position,
-      velocity: velocity,
-      direction: raycaster.ray.direction
-    });
-  }
-
-  /**
-   * 创建发射的小球
-   * @param scene 场景对象
-   * @returns 小球网格对象
-   */
-  private createProjectileSphere(scene: THREE.Scene): THREE.Mesh {
-    // 随机颜色
-    const white = new THREE.Color(0xffffff);
-    const color = new THREE.Color(0x263238 / 2).lerp(white, Math.random() * 0.5 + 0.5);
-
-    // 创建小球几何体和材质
-    const geometry = new THREE.SphereGeometry(10, 40, 40);
-    const material = new THREE.MeshStandardMaterial({ color });
-    const sphere = new THREE.Mesh(geometry, material);
-
-    // 设置阴影
-    sphere.castShadow = true;
-    sphere.receiveShadow = true;
-    if (material) {
-      material.shadowSide = 2;
-    }
-
- 
-
-    // 初始化物理属性
-    sphere.userData.velocity = new THREE.Vector3(0, 0, 0);
-    sphere.userData.collider = new THREE.Sphere(sphere.position, 1);
-
-    // 添加到场景和数组
-    scene.add(sphere);
-    this.spheres.push(sphere);
-
-    // 限制小球数量，防止内存泄漏
-    if (this.spheres.length > this.sphereParams.maxSpheres) {
-      const oldSphere = this.spheres.shift();
-      if (oldSphere) {
-        scene.remove(oldSphere);
-        oldSphere.geometry.dispose();
-        if (oldSphere.material instanceof THREE.Material) {
-          oldSphere.material.dispose();
-        }
-      }
-    }
-
-    return sphere;
+    const ball = new Ball(scene, this.bvhPhysics);
+    ball.shoot(camera, mouseX, mouseY);
+    this.spheres.push(ball)
   }
 
   /**
@@ -994,215 +912,12 @@ export abstract class Model {
    * @param delta 时间增量
    * @param scene 场景对象
    */
-  public updateProjectileSpheres(delta: number, scene: THREE.Scene): void {
+  public updateProjectileSpheres(delta: number): void {
     if (!this.bvhPhysics) return;
 
-    // 获取分离的碰撞体组
-    const colliders = this.bvhPhysics.getColliders();
-    const colliderMapping = this.bvhPhysics.getColliderMapping();
-
-    // 如果没有分离的碰撞体，回退到统一碰撞体
-    if (colliders.size === 0) {
-      this.updateProjectileSpheresWithSingleCollider(delta, scene);
-      return;
-    }
-
-    // 从BVH物理系统获取重力参数
-    const gravity = this.bvhPhysics.params.gravity;
-
-    // 临时变量用于碰撞检测
-    const tempSphere = new THREE.Sphere();
-    const deltaVec = new THREE.Vector3();
-
-    for (let i = this.spheres.length - 1; i >= 0; i--) {
-      const sphere = this.spheres[i];
-      const velocity = sphere.userData.velocity as THREE.Vector3;
-      const sphereCollider = sphere.userData.collider as THREE.Sphere;
-
-      if (!velocity || !sphereCollider) continue;
-
-      // 应用重力（从BVH物理系统获取）
-      velocity.y += gravity * delta;
-
-      // 更新位置
-      sphereCollider.center.addScaledVector(velocity, delta);
-      sphere.position.copy(sphereCollider.center);
-
-      // 检查是否掉出世界
-      if (sphere.position.y < -80) {
-        this.removeSphere(i, scene);
-        continue;
-      }
-
-      // 对每个分离的碰撞体进行碰撞检测
-      tempSphere.copy(sphereCollider);
-      let collided = false;
-      let collisionInfo: { objectId: string; object: any } | undefined = undefined;
-
-      colliders.forEach((collider, objectId) => {
-        if (collided) return; // 如果已经碰撞，跳过其他检测
-
-        if (collider.geometry && (collider.geometry as any).boundsTree) {
-          (collider.geometry as any).boundsTree.shapecast({
-            intersectsBounds: (box: THREE.Box3) => {
-              return box.intersectsSphere(tempSphere);
-            },
-
-            intersectsTriangle: (tri: any) => {
-              // 获取最近点和距离
-              tri.closestPointToPoint(tempSphere.center, deltaVec);
-              deltaVec.sub(tempSphere.center);
-              const distance = deltaVec.length();
-
-              if (distance < tempSphere.radius) {
-                // 移动小球位置到三角形外部
-                const radius = tempSphere.radius;
-                const depth = distance - radius;
-                deltaVec.multiplyScalar(1 / distance);
-                tempSphere.center.addScaledVector(deltaVec, depth);
-                collided = true;
-
-                // 记录碰撞信息
-                collisionInfo = {
-                  objectId: objectId,
-                  object: colliderMapping.get(objectId)
-                };
-              }
-            }
-          });
-        }
-      });
-
-      if (collided && collisionInfo) {
-        // 反射速度
-        deltaVec.subVectors(tempSphere.center, sphereCollider.center).normalize();
-        velocity.reflect(deltaVec);
-
-        // 应用阻尼
-        const dot = velocity.dot(deltaVec);
-        velocity.addScaledVector(deltaVec, -dot * 0.5);
-        velocity.multiplyScalar(Math.max(1.0 - delta, 0));
-
-        // 更新位置
-        sphereCollider.center.copy(tempSphere.center);
-        sphere.position.copy(sphereCollider.center);
-
-        // 触发碰撞事件（可选）
-        if (collisionInfo) {
-          this.onSphereCollision(sphere, collisionInfo.objectId, collisionInfo.object);
-        }
-      }
-    }
-  }
-
-  /**
-   * 回退方法：使用统一碰撞体进行碰撞检测
-   */
-  private updateProjectileSpheresWithSingleCollider(delta: number, scene: THREE.Scene): void {
-    const collider = this.bvhPhysics!.getCollider();
-    if (!collider) return;
-
-    // 从BVH物理系统获取重力参数
-    const gravity = this.bvhPhysics!.params.gravity;
-
-    // 临时变量用于碰撞检测
-    const tempSphere = new THREE.Sphere();
-    const deltaVec = new THREE.Vector3();
-
-    for (let i = this.spheres.length - 1; i >= 0; i--) {
-      const sphere = this.spheres[i];
-      const velocity = sphere.userData.velocity as THREE.Vector3;
-      const sphereCollider = sphere.userData.collider as THREE.Sphere;
-
-      if (!velocity || !sphereCollider) continue;
-
-      // 应用重力
-      velocity.y += gravity * delta;
-
-      // 更新位置
-      sphereCollider.center.addScaledVector(velocity, delta);
-      sphere.position.copy(sphereCollider.center);
-
-      // 检查是否掉出世界
-      if (sphere.position.y < -80) {
-        this.removeSphere(i, scene);
-        continue;
-      }
-
-      // BVH碰撞检测
-      tempSphere.copy(sphereCollider);
-      let collided = false;
-
-      if (collider.geometry && (collider.geometry as any).boundsTree) {
-        (collider.geometry as any).boundsTree.shapecast({
-          intersectsBounds: (box: THREE.Box3) => {
-            return box.intersectsSphere(tempSphere);
-          },
-
-          intersectsTriangle: (tri: any) => {
-            tri.closestPointToPoint(tempSphere.center, deltaVec);
-            deltaVec.sub(tempSphere.center);
-            const distance = deltaVec.length();
-
-            if (distance < tempSphere.radius) {
-              const radius = tempSphere.radius;
-              const depth = distance - radius;
-              deltaVec.multiplyScalar(1 / distance);
-              tempSphere.center.addScaledVector(deltaVec, depth);
-              collided = true;
-            }
-          }
-        });
-      }
-
-      if (collided) {
-        deltaVec.subVectors(tempSphere.center, sphereCollider.center).normalize();
-        velocity.reflect(deltaVec);
-
-        const dot = velocity.dot(deltaVec);
-        velocity.addScaledVector(deltaVec, -dot * 0.5);
-        velocity.multiplyScalar(Math.max(1.0 - delta, 0));
-
-        sphereCollider.center.copy(tempSphere.center);
-        sphere.position.copy(sphereCollider.center);
-      }
-    }
-  }
-
-  /**
-   * 小球碰撞事件处理（可扩展）
-   * @param sphere 碰撞的小球
-   * @param objectId 碰撞对象的ID
-   * @param object 碰撞的对象
-   */
-  private onSphereCollision(sphere: THREE.Mesh, objectId: string, object: any): void {
-    console.log(`🎯 小球碰撞事件:`, {
-      spherePosition: sphere.position,
-      objectId: objectId,
-      objectName: object?.name || 'Unknown'
-    });
-
-    // 这里可以添加更多碰撞效果，比如：
-    // - 粒子效果
-    // - 声音效果
-    // - 对象交互
-    // - 分数计算等
-  }
-
-  /**
-   * 移除指定索引的小球
-   * @param index 小球索引
-   * @param scene 场景对象
-   */
-  private removeSphere(index: number, scene: THREE.Scene): void {
-    const sphere = this.spheres[index];
-    if (sphere) {
-      scene.remove(sphere);
-      sphere.geometry.dispose();
-      if (sphere.material instanceof THREE.Material) {
-        sphere.material.dispose();
-      }
-      this.spheres.splice(index, 1);
+    for (let i = 0; i < this.spheres.length; i++) {
+      const ball = this.spheres[i];
+      ball.updateProjectileSphere(delta);
     }
   }
 
@@ -1211,11 +926,11 @@ export abstract class Model {
    * @param scene 场景对象
    */
   public clearAllSpheres(scene: THREE.Scene): void {
-    this.spheres.forEach(sphere => {
-      scene.remove(sphere);
-      sphere.geometry.dispose();
-      if (sphere.material instanceof THREE.Material) {
-        sphere.material.dispose();
+    this.spheres.forEach(ball => {
+      scene.remove(ball.sphere);
+      ball.sphere.geometry.dispose();
+      if (ball.sphere.material instanceof THREE.Material) {
+        ball.sphere.material.dispose();
       }
     });
     this.spheres.length = 0;
