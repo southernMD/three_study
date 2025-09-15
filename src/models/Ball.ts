@@ -75,7 +75,7 @@ export class Ball {
         const velocity = new THREE.Vector3()
             .set(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5)
             .addScaledVector(raycaster.ray.direction, 10 * Math.random() + 15)
-            .multiplyScalar(50);
+            .multiplyScalar(20);
 
         this.sphere.userData.velocity = velocity;
         this.sphere.userData.mass = Math.pow(this.sphere.scale.x, 3) * Math.PI * 4 / 3;
@@ -85,15 +85,16 @@ export class Ball {
      * 更新所有发射的小球物理状态
      * @param delta 时间增量
      * @param camera 相机对象（用于视野检测）
+     * @returns 是否成功更新
      */
-    public updateProjectileSphere(delta: number, camera?: THREE.Camera): void {
-        if (!this.bvhPhysics) return;
+    public updateProjectileSphere(delta: number, camera?: THREE.Camera): boolean {
+        if (!this.bvhPhysics) return false;
 
         const sphere = this.sphere
         const velocity = sphere.userData.velocity as THREE.Vector3;
         const sphereCollider = sphere.userData.collider as THREE.Sphere;
 
-        if (!velocity || !sphereCollider) return;
+        if (!velocity || !sphereCollider) return false;
 
         // 应用重力（从BVH物理系统获取）
         const gravity = this.bvhPhysics.params.gravity;
@@ -105,14 +106,13 @@ export class Ball {
 
         // 检查是否掉出世界
         if (sphere.position.y < -80) {
-            this.removeSphere();
-            return;
+            return false;
         }
 
         // 性能优化：只对在相机视野内的小球进行碰撞检测
         if (camera && !this.isInCameraView(camera)) {
             console.log("不在视野内，跳过碰撞检测");
-            return; // 不在视野内，跳过碰撞检测
+            return false; // 不在视野内，跳过碰撞检测
         }
         console.log("在视野内，碰撞检测");
 
@@ -167,7 +167,7 @@ export class Ball {
         }
 
 
-
+        //发生碰撞
         if (collided && collisionInfo) {
             // 反射速度
             deltaVec.subVectors(tempSphere.center, sphereCollider.center).normalize();
@@ -187,6 +187,7 @@ export class Ball {
                 this.onSphereCollision(sphere, collisionInfo.objectId, collisionInfo.object);
             }
         }
+        return true; // 不在视野内，跳过碰撞检测
     }
 
     /**
@@ -213,7 +214,7 @@ export class Ball {
     /**
      * 移除小球
      */
-    private removeSphere(): void {
+    public removeSphere(): void {
         this.scene.remove(this.sphere);
         if (this.sphere.material instanceof THREE.Material) {
             this.sphere.material.dispose();

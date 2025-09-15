@@ -125,19 +125,35 @@ const guiFn = {
         const object = mapping.get(objectId);
         console.log(`    - ID: ${objectId}`);
         console.log(`      名称: ${collider.name}`);
-        console.log(`      对象: ${object?.name || 'Unknown'}`);
+        console.log(`      对象: ${object?.constructor.name || 'Unknown'}`);
         console.log(`      顶点数: ${collider.geometry.attributes.position?.count || 0}`);
       });
     } else {
-      const unifiedCollider = bvhPhysics.getCollider();
-      if (unifiedCollider) {
-        console.log('  使用统一碰撞体:');
-        console.log(`    名称: ${unifiedCollider.name}`);
-        console.log(`    顶点数: ${unifiedCollider.geometry.attributes.position?.count || 0}`);
-      } else {
-        console.log('  没有可用的碰撞体');
-      }
+      console.log('  没有可用的分离碰撞体');
     }
+  },
+  // 切换树的碰撞体显示
+  toggleTreeColliders: () => {
+    const bvhPhysics = globalState.bvhPhysics;
+    if (!bvhPhysics) {
+      console.log('❌ BVH物理系统未初始化');
+      return;
+    }
+
+    const colliders = bvhPhysics.getColliders();
+    let treeColliderCount = 0;
+    let visibleCount = 0;
+
+    colliders.forEach((collider, objectId) => {
+      if (objectId.startsWith('tree-')) {
+        treeColliderCount++;
+        collider.visible = !collider.visible;
+        if (collider.visible) visibleCount++;
+      }
+    });
+
+    console.log(`🌳 切换了 ${treeColliderCount} 个树碰撞体的显示`);
+    console.log(`📦 当前可见树碰撞体: ${visibleCount} 个`);
   },
   // 演示在当前位置创建一个碰撞箱
   createBoxHere: () => {
@@ -414,6 +430,7 @@ const sphereFolder = gui.addFolder('小球发射功能')
 sphereFolder.add(guiFn, 'clearSpheres').name('清理所有小球')
 sphereFolder.add(guiFn, 'getSphereCount').name('显示小球数量')
 sphereFolder.add(guiFn, 'showColliderInfo').name('显示碰撞体信息')
+sphereFolder.add(guiFn, 'toggleTreeColliders').name('切换树碰撞体显示')
 sphereFolder.add({ info: '右键点击屏幕发射小球' }, 'info').name('使用说明').listen()
 sphereFolder.open()
 
@@ -825,7 +842,7 @@ function animate(timestamp?: number) {
       model.updateMovement();
 
       // 更新发射的小球物理（传递相机进行视野优化）
-      model.updateProjectileSpheres(1/120, hadRenderCamera);
+      model.updateProjectileSpheres(1/60, hadRenderCamera);
 
       // 只在需要调试时才更新辅助器（包围盒、胶囊体等）
       // 注释掉这些行可以提高性能
@@ -900,24 +917,13 @@ function setupBVHCollision() {
   console.log('🌍 开始创建分离碰撞体组...');
   const separateColliders = bvhPhysics.createSeparateColliders(objectManager.getAllObjects());
 
-  if (separateColliders.size > 0) {
-    console.log(`✅ 分离碰撞体组创建成功! 数量: ${separateColliders.size}`);
+  console.log(`✅ 分离碰撞体组创建成功! 数量: ${separateColliders.size}`);
 
-    // 打印每个碰撞体的信息
-    separateColliders.forEach((collider, objectId) => {
-      console.log(`  - ${objectId}: ${collider.name}`);
-    });
-  } else {
-    console.log('⚠️ 分离碰撞体组创建失败，回退到统一碰撞体...');
+  // 打印每个碰撞体的信息
+  separateColliders.forEach((collider, objectId) => {
+    console.log(`  - ${objectId}: ${collider.name}`);
+  });
 
-    // 回退到统一碰撞体
-    const sceneCollider = bvhPhysics.createSceneCollider(objectManager.getAllObjects());
-    if (sceneCollider) {
-      console.log('✅ 统一场景碰撞体创建成功');
-    } else {
-      console.log('❌ 统一场景碰撞体创建失败');
-    }
-  }
 
   console.log('🎯 BVH碰撞检测设置完成');
 }

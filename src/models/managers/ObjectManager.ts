@@ -5,6 +5,7 @@ import { SchoolBuilding } from '../architecture/SchoolBuilding';
 import { Ground } from '../architecture/Ground';
 import { BaseModel } from '../architecture/BaseModel';
 import { PHYSICS_CONSTANTS } from '../../constants/PhysicsConstants';
+import { Tree } from '../architecture/Tree';
 
 /**
  * 对象管理器 - 统一管理所有静态模型对象
@@ -29,17 +30,20 @@ export class ObjectManager {
     });
 
     await this.createOvalTrack('main-track', {
-      position: { x: 0, y: 2, z: 100 },
+      position: { x: 0, y: 5, z: 675 },
       rotation: { x: 0, y: 0, z: 0 },
       scale: 8 // 支持x、z轴独立缩放
     });
 
     // 创建学校建筑
     await this.createSchoolBuilding('school-building', {
-      position: { x: 0, y: 0, z: -300 },
-      rotation: { x: 0, y: 0, z: 0 },
-      scale: 1
+      position: { x: 500, y: 0, z: -500 },
+      rotation: { x: 0, y: 90, z: 0 },
+      scale: 0.75
     });
+
+    // 创建20棵树
+    await this.createMultipleTrees();
 
     // 直接创建边界墙体
     await this.createBoundaryWalls();
@@ -285,8 +289,80 @@ export class ObjectManager {
     console.log(`✅ 学校建筑创建完成: ${id}`);
     return building;
   }
+  async createTree(
+    id: string,
+    options: {
+      position?: { x: number; y: number; z: number };
+      rotation?: { x: number; y: number; z: number };
+      scale?: number;
+    } = {}
+  ): Promise<Tree> {
+    console.log(`🌳 创建树: ${id}`);
 
+    // 创建变换参数
+    const transform = {
+      position: options.position || { x: 0, y: 0, z: 0 },
+      rotation: options.rotation || { x: 0, y: 0, z: 0 },
+      scale: options.scale || 1
+    };
 
+    const tree = new Tree(
+      this.scene,
+      transform,
+      id
+    );
+
+    await tree.create();
+
+    this.objects.set(id, tree);
+    console.log(`✅ 树创建完成: ${id}`);
+    return tree;
+  }
+
+  /**
+   * 创建多棵树（20棵）
+   */
+  async createMultipleTrees(): Promise<void> {
+    console.log('🌲 开始创建20棵树...');
+    const tree = new Tree(this.scene,undefined, 'treeGroup');
+    await tree.create();
+    const oneTree = tree.getModelGroup().children[0]
+    console.log(oneTree);
+    const group = new THREE.Group();
+    group.name = 'treeGroup'
+
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(500 * 2,0,500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(300 * 2,0,500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(100 * 2,0,500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-100 * 2,0,500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-300 * 2,0,500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-500 * 2,0,500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-500 * 2,0,300 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-500 * 2,0,100 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-500 * 2,0,-100 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-500 * 2,0,-300 * 2)));
+
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-500 * 2,0,-500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-300 * 2,0,-500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(-100 * 2,0,-500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(100 * 2,0,-500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(300 * 2,0,-500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(500 * 2,0,-500 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(500 * 2,0,-300 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(500 * 2,0,-100 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(500 * 2,0,100 * 2)));
+    group.add(this.createOneTree(oneTree, new THREE.Vector3(500 * 2,0,300 * 2)));
+
+    tree.setModelGroup(group);
+    tree.addToScene()
+    this.objects.set("tree-group", tree);
+  }
+
+  createOneTree(tree:THREE.Object3D<THREE.Object3DEventMap>,position:THREE.Vector3){
+    const newOne = tree.clone()
+    newOne.position.set(position.x,position.y,position.z)
+    return newOne
+  }
 
   /**
    * 获取对象

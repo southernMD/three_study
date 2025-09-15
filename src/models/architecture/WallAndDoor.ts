@@ -22,6 +22,7 @@ export class WallAndDoor extends BaseModel {
     private columnObject: THREE.Object3D | null = null;    // 柱子对象
     private wallObject: THREE.Object3D | null = null;      // 墙体对象
     private gateObject: THREE.Group | null = null;     // 门对象
+    private static wallModel: GLTF | null = null;
 
     // 可控制的缩放值
     public wallScale: number
@@ -54,12 +55,13 @@ export class WallAndDoor extends BaseModel {
                 );
             });
         };
-
-        const gltf = await loadModel();
+        if(!WallAndDoor.wallModel){
+            WallAndDoor.wallModel = await loadModel();
+        }
         console.log('🔍 开始提取模型部件...');
 
         // 获取所有部件
-        const allParts = this.findWallGroup(gltf.scene);
+        const allParts = this.findWallGroup(WallAndDoor.wallModel.scene);
         console.log('📦 找到的部件:', allParts.map(p => p.name));
 
         // 分别提取每种类型的部件并创建独立块

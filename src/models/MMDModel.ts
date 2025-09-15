@@ -114,7 +114,7 @@ export class MMDModel extends Model {
       this.helper.add(mmd, { physics: false }); // 禁用MMD物理引擎，使用我们自己的Cannon.js物理引擎
       this.mesh = mmd;
       const meshSize = this.setModelDimensions()
-      const minWidth = 10;  // 网格基本单位
+      const minWidth = 8;  // 网格基本单位
       const scaleXZ = Math.max(minWidth / meshSize.width, minWidth / meshSize.depth);
       const scaleFactor = Math.max(1, scaleXZ); // 至少保持原大小
       this.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);

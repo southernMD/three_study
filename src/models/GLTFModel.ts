@@ -100,7 +100,7 @@ export class GLTFModel extends Model {
       // 设置模型
       this.mesh = gltf.scene;
       const meshSize = this.setModelDimensions()
-      const minWidth = 10;  // 网格基本单位
+      const minWidth = 8;  // 网格基本单位
       const scaleXZ = Math.max(minWidth / meshSize.width, minWidth / meshSize.depth);
       const scaleFactor = Math.max(1, scaleXZ); // 至少保持原大小
       this.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);

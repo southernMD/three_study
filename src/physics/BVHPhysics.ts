@@ -1,4 +1,5 @@
 import { BaseModel } from '@/models/architecture/BaseModel';
+import { Tree } from '@/models/architecture/Tree';
 import * as THREE from 'three';
 import { MeshBVH, MeshBVHHelper, StaticGeometryGenerator } from 'three-mesh-bvh';
 
@@ -30,87 +31,12 @@ export class BVHPhysics {
   }
 
   /**
-   * 🔥 核心方法：扫描整个场景，创建统一的BVH碰撞体（排除人物模型）
-   * 参考 characterMovement.js 和 physics.js 的实现
-   */
-  createSceneCollider(staticObjects?: Map<string, BaseModel>): THREE.Mesh | null {
-    console.log('🔧 开始创建场景统一碰撞体...');
-
-    // 清理现有碰撞体
-    this.dispose();
-    // 创建临时组来收集所有需要碰撞的对象
-    const collisionGroup = new THREE.Group();
-    staticObjects?.forEach((object) => {
-      // 遍历对象的模型组，收集所有网格
-      const modelGroup = object.getModelGroup();
-      if (modelGroup) {
-        modelGroup.traverse((child: THREE.Object3D) => {
-          if (child instanceof THREE.Mesh && child.geometry) {
-            // 克隆网格并应用世界变换
-            const clonedMesh = child.clone();
-            clonedMesh.geometry = child.geometry.clone();
-
-            // 应用对象的世界变换矩阵
-            child.updateMatrixWorld(true);
-            clonedMesh.applyMatrix4(child.matrixWorld);
-
-            // 添加到碰撞组
-            collisionGroup.add(clonedMesh);
-          }
-        });
-      }
-    })
-    if (collisionGroup.children.length === 0) {
-      console.warn('⚠️ 场景中没有找到可碰撞的网格');
-      return null;
-    }
-
-    console.log(`🔧 收集到 ${collisionGroup.children.length} 个网格，开始合并...`);
-
-    // 使用 StaticGeometryGenerator 合并所有几何体
-    const staticGenerator = new StaticGeometryGenerator(collisionGroup);
-    staticGenerator.attributes = ['position'];
-
-    const mergedGeometry = staticGenerator.generate();
-    mergedGeometry.boundsTree = new MeshBVH(mergedGeometry,{
-      maxDepth: 40,           // 降低最大深度
-      maxLeafTris: 10,        // 减少叶子节点三角形数量
-      verbose: true           // 查看构建信息
-    });
-
-    // 创建统一的碰撞体
-    const sceneCollider = new THREE.Mesh(mergedGeometry);
-    sceneCollider.name = 'SceneCollider';
-    sceneCollider.material = new THREE.MeshBasicMaterial({
-      wireframe: true,
-      opacity: 0.5,
-      transparent: true,
-      visible: this.params.displayCollider,
-      color: 0x00ff00
-    });
-
-    // 创建BVH可视化器
-    const visualizer = new MeshBVHHelper(sceneCollider, this.params.visualizeDepth);
-    visualizer.visible = this.params.displayBVH;
-
-    this.collider = sceneCollider;
-    this.visualizer = visualizer;
-
-    this.scene.add(sceneCollider);
-    this.scene.add(visualizer);
-
-    console.log(`✅ 场景统一碰撞体创建成功! 顶点数: ${mergedGeometry.attributes.position.count}`);
-
-    return sceneCollider;
-  }
-
-  /**
    * 🔥 新方法：为每个对象创建独立的BVH碰撞体
    * 建立对象与碰撞体的映射关系
    */
   createSeparateColliders(staticObjects?: Map<string, BaseModel>): Map<string, THREE.Mesh> {
     console.log('🔧 开始创建分离的碰撞体组...');
-
+    debugger
     // 清理现有的分离碰撞体
     this.disposeSeparateColliders();
 
@@ -118,8 +44,18 @@ export class BVHPhysics {
       console.warn('⚠️ 没有静态对象可创建碰撞体');
       return this.colliders;
     }
-
     staticObjects.forEach((object, objectId) => {
+      // 特殊处理：如果是tree-group，为所有树创建简单盒模型碰撞体
+      if (objectId === 'tree-group') {
+        console.log('🌳 开始为树组创建碰撞体...');
+        const treeGroup = object as Tree;
+        const trees = treeGroup.getModelGroup().children;
+
+        this.createTreeColliders(trees);
+        return; // 跳过常规处理
+      }
+
+      // 常规处理：遍历模型组
       const modelGroup = object.getModelGroup();
       if (!modelGroup) {
         console.warn(`⚠️ 对象 ${objectId} 没有模型组`);
@@ -193,6 +129,67 @@ export class BVHPhysics {
   }
 
   /**
+   * 为所有树创建简单盒模型碰撞体
+   */
+  private createTreeColliders(trees: THREE.Object3D[]): void {
+    console.log(`🌳 开始为 ${trees.length} 棵树创建盒模型碰撞体...`);
+
+    trees.forEach((tree, index) => {
+      if (!tree || !tree.position) return;
+
+      const treeId = `tree-${index + 1}`;
+
+      // 创建简单的盒模型几何体 (宽8, 高12, 深8)
+      const boxGeometry = new THREE.BoxGeometry(30, 500, 30);
+
+      // 创建BVH
+      boxGeometry.boundsTree = new MeshBVH(boxGeometry);
+
+      // 创建碰撞体材质
+      const colliderMaterial = new THREE.MeshBasicMaterial({
+        wireframe: true,
+        opacity: 0.3,
+        transparent: true,
+        visible: this.params.displayCollider,
+        color: this.getRandomColor()
+      });
+
+      // 创建碰撞体网格
+      const treeCollider = new THREE.Mesh(boxGeometry, colliderMaterial);
+      treeCollider.name = `TreeCollider_${treeId}`;
+
+      // 设置碰撞体位置（与树的位置对应，调整高度到中心）
+      treeCollider.position.copy(tree.position);
+      treeCollider.position.y += 6; // 调整到盒子中心高度
+
+      // 应用树的旋转和缩放
+      if (tree.rotation) {
+        treeCollider.rotation.copy(tree.rotation);
+      }
+      if (tree.scale) {
+        treeCollider.scale.copy(tree.scale);
+      }
+      debugger
+      // 创建BVH可视化器
+      const visualizer = new MeshBVHHelper(treeCollider, this.params.visualizeDepth);
+      visualizer.visible = this.params.displayBVH;
+      visualizer.name = `TreeVisualizer_${treeId}`;
+
+      // 存储到映射中
+      this.colliders.set(treeId, treeCollider);
+      this.visualizers.set(treeId, visualizer);
+
+      // 添加到场景
+      this.scene.add(treeCollider);
+      this.scene.add(visualizer);
+
+      console.log(`✅ 树 ${treeId} 的盒模型碰撞体创建完成`);
+    });
+
+    console.log(`🌲 所有树的碰撞体创建完成，共 ${trees.length} 个`);
+  }
+
+  /**
    * 生成随机颜色用于区分不同的碰撞体
    */
   private getRandomColor(): number {
@@ -205,7 +202,7 @@ export class BVHPhysics {
    */
   private disposeSeparateColliders(): void {
     // 清理碰撞体
-    this.colliders.forEach((collider, id) => {
+    this.colliders.forEach((collider) => {
       if (collider.geometry) {
         collider.geometry.dispose();
       }
@@ -216,7 +213,7 @@ export class BVHPhysics {
     });
 
     // 清理可视化器
-    this.visualizers.forEach((visualizer, id) => {
+    this.visualizers.forEach((visualizer) => {
       this.scene.remove(visualizer);
     });
 

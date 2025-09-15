@@ -229,7 +229,7 @@ export abstract class BaseModel {
   private parseScale(
     value: { x: number; y: number; z: number } | number | THREE.Vector3 | undefined,
     defaultValue: THREE.Vector3
-  ): THREE.Vector3 {
+  ): THREE.Vector3 {    
     if (!value) return defaultValue;
     if (typeof value === 'number') {
       return new THREE.Vector3(value, value, value);
@@ -257,6 +257,13 @@ export abstract class BaseModel {
    */
   getModelGroup(): THREE.Group {
     return this.modelGroup;
+  }
+
+    /**
+   * 获取模型组引用
+   */
+  setModelGroup(group:THREE.Group) {
+    this.modelGroup = group
   }
 
   /**

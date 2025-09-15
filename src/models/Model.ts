@@ -445,16 +445,6 @@ export abstract class Model {
     const colliders = this.bvhPhysics.getColliders();
     const colliderMapping = this.bvhPhysics.getColliderMapping();
 
-    // 如果没有分离的碰撞体，回退到单一碰撞体
-    if (colliders.size === 0) {
-      const singleCollider = this.bvhPhysics.getCollider();
-      if (singleCollider) {
-        debugger
-        this.performSingleColliderDetection(singleCollider, delta);
-      }
-      return;
-    }
-
     if (!this.mesh || !this.playerCapsule || !this.capsuleParams) return;
 
     // 临时变量
@@ -567,73 +557,6 @@ export abstract class Model {
     }
   }
 
-  /**
-   * 对单个碰撞体执行碰撞检测（回退方法）
-   */
-  private performSingleColliderDetection(collider: THREE.Mesh, delta: number): void {
-    if (!this.mesh || !this.playerCapsule || !this.capsuleParams || !collider) return;
-
-    const tempBox = new THREE.Box3();
-    const tempMat = new THREE.Matrix4();
-    const tempSegment = new THREE.Line3();
-    const capsuleInfo = this.capsuleParams;
-
-    tempBox.makeEmpty();
-    tempMat.copy(collider.matrixWorld).invert();
-
-    const originalCapsuleStart = this.playerCapsule.start.clone()
-
-    tempSegment.start.copy(this.playerCapsule.start);
-    tempSegment.end.copy(this.playerCapsule.end);
-
-    tempSegment.start.applyMatrix4(tempMat);
-    tempSegment.end.applyMatrix4(tempMat);
-
-    tempBox.expandByPoint(tempSegment.start);
-    tempBox.expandByPoint(tempSegment.end);
-
-    tempBox.min.addScalar(-capsuleInfo.radius);
-    tempBox.max.addScalar(capsuleInfo.radius);
-
-    (collider.geometry as any).boundsTree.shapecast({
-      intersectsBounds: (box: THREE.Box3) => box.intersectsBox(tempBox),
-
-      intersectsTriangle: (tri: any) => {
-        const triPoint = this.tempVector;
-        const capsulePoint = this.tempVector2;
-
-        const distance = tri.closestPointToSegment(tempSegment, triPoint, capsulePoint);
-        if (distance < capsuleInfo.radius) {
-          const depth = capsuleInfo.radius - distance;
-          const direction = capsulePoint.sub(triPoint).normalize();
-
-          tempSegment.start.addScaledVector(direction, depth);
-          tempSegment.end.addScaledVector(direction, depth);
-        }
-      }
-    });
-
-    const newPosition = this.tempVector;
-    newPosition.copy(tempSegment.start).applyMatrix4(collider.matrixWorld)
-
-    const deltaVector = this.tempVector2;
-    deltaVector.subVectors(newPosition, originalCapsuleStart);
-
-    const wasOnGround = this.playerIsOnGround;
-    this.playerIsOnGround = deltaVector.y > Math.abs(delta * this.playerVelocity.y * 0.25);
-
-    const offset = Math.max(0.0, deltaVector.length() - 1e-5);
-    deltaVector.normalize().multiplyScalar(offset);
-
-    this.mesh.position.add(deltaVector);
-
-    if (!this.playerIsOnGround) {
-      deltaVector.normalize();
-      this.playerVelocity.addScaledVector(deltaVector, -deltaVector.dot(this.playerVelocity));
-    } else {
-      this.playerVelocity.set(0, 0, 0);
-    }
-  }
 
   /**
    * 角色碰撞事件处理
@@ -917,7 +840,12 @@ export abstract class Model {
 
     for (let i = 0; i < this.spheres.length; i++) {
       const ball = this.spheres[i];
-      ball.updateProjectileSphere(delta, camera);
+      const isSuccess = ball.updateProjectileSphere(delta, camera);
+      if(!isSuccess){
+        ball.removeSphere();
+        this.spheres.splice(i, 1);
+        i--;
+      }
     }
   }
 
