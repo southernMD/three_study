@@ -19,7 +19,7 @@ export class BVHPhysics {
   
   // 物理参数
   public params = {
-    gravity: -30,
+    gravity: -60,
     physicsSteps: 5,
     displayCollider: false,
     displayBVH: false,
@@ -53,8 +53,10 @@ export class BVHPhysics {
 
         this.createTreeColliders(trees);
         return; // 跳过常规处理
-      }
+      }else if(objectId === 'school-building'){
+        const modelGroup = object.getModelGroup();
 
+      }
       // 常规处理：遍历模型组
       const modelGroup = object.getModelGroup();
       if (!modelGroup) {

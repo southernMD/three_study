@@ -118,7 +118,7 @@ export class MMDModel extends Model {
       const scaleXZ = Math.max(minWidth / meshSize.width, minWidth / meshSize.depth);
       const scaleFactor = Math.max(1, scaleXZ); // 至少保持原大小
       this.mesh.scale.set(scaleFactor, scaleFactor, scaleFactor);
-      this.mesh.position.set(0,0,0)
+      this.mesh.position.set(0,2,0)
       this.setModelDimensions()
 
       // 创建胶囊体碰撞检测 - 按照ModelBefore.ts

@@ -155,6 +155,35 @@ const guiFn = {
     console.log(`🌳 切换了 ${treeColliderCount} 个树碰撞体的显示`);
     console.log(`📦 当前可见树碰撞体: ${visibleCount} 个`);
   },
+  // 显示学校建筑门信息
+  showSchoolDoorInfo: () => {
+    if (objectManager) {
+      const schoolBuilding = objectManager.getMainSchoolBuilding();
+      if (schoolBuilding && typeof schoolBuilding.getDoorStats === 'function') {
+        const stats = schoolBuilding.getDoorStats();
+        const doorGroupsData = schoolBuilding.getDoorGroupsData();
+
+        console.log('🏫 学校建筑门信息:');
+        console.log(`📊 统计: 总计${stats.total}个门，已找到${stats.found}个，缺失${stats.missing}个`);
+        console.log(`🚪 门组数量: ${stats.groups}个`);
+
+        if (doorGroupsData.length > 0) {
+          console.log('📋 门组详情:');
+          doorGroupsData.forEach((group, groupIndex) => {
+            console.log(`  组${groupIndex + 1} (${group.length}个门):`);
+            group.forEach((doorData, doorIndex) => {
+              const status = doorData.mesh ? '✅ 已找到' : '❌ 缺失';
+              const openStatus = doorData.isOpen ? '开启' : '关闭';
+              const type = doorData.type || '普通';
+              console.log(`    门${doorIndex + 1}: ${doorData.name} - ${status} - ${openStatus} - ${type}`);
+            });
+          });
+        }
+      } else {
+        console.log('❌ 学校建筑未找到或门数据未初始化');
+      }
+    }
+  },
   // 演示在当前位置创建一个碰撞箱
   createBoxHere: () => {
     mmdModelManager.createBoxHere((color, position) => {

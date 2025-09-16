@@ -124,7 +124,7 @@ export abstract class Model {
 
     // 计算胶囊体参数 - 完全贴合模型
     // 半径设为模型宽度和深度中较大值的一半
-    const radius = Math.max(dimensions.width, dimensions.depth) / 4;
+    const radius = Math.max(Math.max(dimensions.width, dimensions.depth) / 4,6);
 
     // 确保半径不为0或NaN
     const safeRadius = Math.max(0.1, radius || 0.1);
