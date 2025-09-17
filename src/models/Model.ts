@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GlobalState } from '../types/GlobalState';
 import { BVHPhysics } from '../physics/BVHPhysics';
 import { Ball } from './Ball';
-
+import mountKeyBoardMessageBox from '@/ImperativeComponents/keyBoardMessage';
 // 基础模型类 - 完全基于BVH物理系统
 export abstract class Model {
   abstract mesh: THREE.Object3D;
@@ -30,6 +30,10 @@ export abstract class Model {
   private playerVelocity = new THREE.Vector3();
   private upVector = new THREE.Vector3(0, 1, 0);
   private delta = 0.016;
+
+  // school-building-G检测相关
+  private lastSchoolBuildingGCheck: number = 0;
+  private schoolBuildingGCheckInterval: number = 1000; // 1秒检测一次
 
   // 碰撞相关
   protected playerCapsule?: Capsule;
@@ -243,7 +247,7 @@ export abstract class Model {
   /**
    * 使用BVH进行碰撞检测和物理更新（参考characterMovement.js）
    */
-  handleBVHPhysics(delta: number): void {
+  handleBVHPhysics(delta: number,screen:THREE.Scene): void {
     if (!this.bvhPhysics || !this.mesh || !this.playerCapsule || !this.capsuleParams) {
       console.log('❌ BVH物理系统组件缺失:', {
         bvhPhysics: !!this.bvhPhysics,
@@ -281,7 +285,7 @@ export abstract class Model {
     this.mesh.updateMatrixWorld();
 
     // 使用新的分离碰撞体检测
-    this.performSeparateCollidersDetection(delta);
+    this.performSeparateCollidersDetection(delta,screen);
 
     // // 简单的地面检测
     // if (this.mesh.position.y < 0) {
@@ -430,16 +434,14 @@ export abstract class Model {
   /**
    * 主更新方法
    */
-  updateMovement(): void {
-    this.handleBVHPhysics(this.delta);
+  updateMovement(screen:THREE.Scene): void {
+    this.handleBVHPhysics(this.delta,screen);
   }
-
-  // ==================== BVH 物理系统方法 ====================
 
   /**
    * 对分离的碰撞体组执行碰撞检测
    */
-  private performSeparateCollidersDetection(delta: number): void {
+  private performSeparateCollidersDetection(delta: number,screen:THREE.Scene): void {
     if (!this.bvhPhysics) return;
 
     const colliders = this.bvhPhysics.getColliders();
@@ -467,7 +469,7 @@ export abstract class Model {
     // 对每个分离的碰撞体进行检测
     colliders.forEach((collider, objectId) => {
       if (!collider.geometry || !(collider.geometry as any).boundsTree) return;
-
+      if (objectId.startsWith("school-door-G") && collider.userData?.isOpen === true)return;
       // 重置临时变量
       tempBox.makeEmpty();
       tempMat.copy(collider.matrixWorld).invert();
@@ -504,6 +506,25 @@ export abstract class Model {
             tempSegment.start.addScaledVector(direction, depth);
             tempSegment.end.addScaledVector(direction, depth);
             colliderHasCollision = true;
+          }else{
+            if(objectId.startsWith('school-door-G') && distance < 10){
+              // 先找到要删除的对象
+              const doorName = objectId.split('school-door-')[1];
+              //直接开门,然后把门隐藏
+              screen.traverse((child) => {
+                if(child.name === doorName){
+                  child.visible = false;
+                  if(collider.userData.isOpen === false){
+                    mountKeyBoardMessageBox({
+                      targetKey: 'F',
+                      message: '我是一个弹出窗',
+                      visible:true
+                    })
+                    // collider.userData.isOpen = true;
+                  }
+                }
+              });
+            }
           }
         }
       });

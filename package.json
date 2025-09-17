@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@styils/vue": "^1.1.7",
     "@types/dat.gui": "^0.7.10",
     "ammo.js": "^0.0.10",
     "cannon": "^0.6.2",
@@ -29,6 +30,7 @@
     "@types/node": "^22.7.7",
     "@types/three": "^0.170.0",
     "@vitejs/plugin-vue": "^4.2.3",
+    "@vitejs/plugin-vue-jsx": "^5.1.1",
     "fs": "^0.0.1-security",
     "less": "^4.2.0",
     "path": "^0.12.7",

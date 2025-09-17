@@ -1,6 +1,6 @@
 <script setup lang="ts">
 
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted,nextTick } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
@@ -105,33 +105,6 @@ const guiFn = {
     }
     return 0;
   },
-  // 显示碰撞体信息
-  showColliderInfo: () => {
-    const bvhPhysics = globalState.bvhPhysics;
-    if (!bvhPhysics) {
-      console.log('❌ BVH物理系统未初始化');
-      return;
-    }
-
-    const colliders = bvhPhysics.getColliders();
-    const mapping = bvhPhysics.getColliderMapping();
-
-    console.log('🔍 碰撞体信息:');
-    console.log(`  分离碰撞体数量: ${colliders.size}`);
-
-    if (colliders.size > 0) {
-      console.log('  碰撞体列表:');
-      colliders.forEach((collider, objectId) => {
-        const object = mapping.get(objectId);
-        console.log(`    - ID: ${objectId}`);
-        console.log(`      名称: ${collider.name}`);
-        console.log(`      对象: ${object?.constructor.name || 'Unknown'}`);
-        console.log(`      顶点数: ${collider.geometry.attributes.position?.count || 0}`);
-      });
-    } else {
-      console.log('  没有可用的分离碰撞体');
-    }
-  },
   // 切换树的碰撞体显示
   toggleTreeColliders: () => {
     const bvhPhysics = globalState.bvhPhysics;
@@ -155,34 +128,21 @@ const guiFn = {
     console.log(`🌳 切换了 ${treeColliderCount} 个树碰撞体的显示`);
     console.log(`📦 当前可见树碰撞体: ${visibleCount} 个`);
   },
-  // 显示学校建筑门信息
-  showSchoolDoorInfo: () => {
-    if (objectManager) {
-      const schoolBuilding = objectManager.getMainSchoolBuilding();
-      if (schoolBuilding && typeof schoolBuilding.getDoorStats === 'function') {
-        const stats = schoolBuilding.getDoorStats();
-        const doorGroupsData = schoolBuilding.getDoorGroupsData();
 
-        console.log('🏫 学校建筑门信息:');
-        console.log(`📊 统计: 总计${stats.total}个门，已找到${stats.found}个，缺失${stats.missing}个`);
-        console.log(`🚪 门组数量: ${stats.groups}个`);
-
-        if (doorGroupsData.length > 0) {
-          console.log('📋 门组详情:');
-          doorGroupsData.forEach((group, groupIndex) => {
-            console.log(`  组${groupIndex + 1} (${group.length}个门):`);
-            group.forEach((doorData, doorIndex) => {
-              const status = doorData.mesh ? '✅ 已找到' : '❌ 缺失';
-              const openStatus = doorData.isOpen ? '开启' : '关闭';
-              const type = doorData.type || '普通';
-              console.log(`    门${doorIndex + 1}: ${doorData.name} - ${status} - ${openStatus} - ${type}`);
-            });
-          });
-        }
-      } else {
-        console.log('❌ 学校建筑未找到或门数据未初始化');
-      }
+  // 临时禁用门碰撞体
+  toggleDoorColliders: () => {
+    const bvhPhysics = globalState.bvhPhysics;
+    if (!bvhPhysics) {
+      console.log('❌ BVH物理系统未初始化');
+      return;
     }
+
+    const colliders = bvhPhysics.getColliders();
+    colliders.forEach((collider, objectId) => {
+      if (objectId.startsWith('school-door-') && !objectId.includes('nondoors')) {
+        colliders.delete(objectId);
+      }
+    });
   },
   // 演示在当前位置创建一个碰撞箱
   createBoxHere: () => {
@@ -194,47 +154,6 @@ const guiFn = {
   createFallingBoxesNow: () => {
     testBoxManager.createFallingBoxes();
   },
-  // 显示物理世界信息（已移除 PhysicsManager）
-  showPhysicsInfo: () => {
-    console.log('ℹ️ PhysicsManager 已移除，现在使用 BVH 物理系统');
-  },
-  // 检查碰撞检测状态
-  checkCollisionStatus: () => {
-    console.log('🔍 检查BVH碰撞检测状态...');
-
-    // 检查全局BVH物理系统
-    if (globalState.bvhPhysics) {
-      const colliders = globalState.bvhPhysics.getColliders();
-      console.log(`📊 BVH碰撞体数量: ${colliders.length}`);
-      colliders.forEach((collider, index) => {
-        console.log(`  碰撞体 ${index}: ${collider.name}, 顶点数: ${collider.geometry.attributes.position.count}`);
-      });
-    } else {
-      console.log('❌ 全局BVH物理系统未找到');
-    }
-
-    // 检查人物BVH物理状态
-    const model = mmdModelManager?.getModel();
-    if (model && 'debugBVHPhysics' in model) {
-      (model as any).debugBVHPhysics();
-    } else {
-      console.log('❌ 人物模型未找到或不支持BVH物理检查');
-    }
-  },
-  // 检查BVH物理状态
-  checkPhysicsSync: () => {
-    console.log('🔍 检查BVH物理状态...');
-    const model = mmdModelManager?.getModel();
-    if (model && 'getBVHPhysicsStatus' in model) {
-      const status = (model as any).getBVHPhysicsStatus();
-      console.log('📊 BVH物理状态:', status);
-    } else {
-      console.log('❌ 人物模型未找到或不支持BVH物理状态检查');
-    }
-  },
-
-
-
   // 显示跑道信息
   showTrackInfo: () => {
     const mainTrack = objectManager?.getMainTrack();
@@ -391,15 +310,32 @@ const physicsVisualizationControl = {
       globalState.bvhPhysics.params.displayBVH = physicsVisualizationControl.displayBVH;
       globalState.bvhPhysics.updateVisualization();
       console.log(`   🌍 BVHPhysics BVH辅助线: ${physicsVisualizationControl.displayBVH ? '显示' : '隐藏'}`);
-    }
 
-    // 控制学校建筑的BVH可视化
-    const schoolBuilding = objectManager?.getMainSchoolBuilding();
-    if (schoolBuilding && 'setVisualizationParams' in schoolBuilding) {
-      (schoolBuilding as any).setVisualizationParams({
-        displayBVH: physicsVisualizationControl.displayBVH
+      // 控制学校建筑碰撞体显示
+      const colliders = globalState.bvhPhysics.getColliders();
+      let schoolColliderCount = 0;
+      let visibleCount = 0;
+
+      colliders.forEach((collider, objectId) => {
+        if (objectId.startsWith('school-')) {
+          schoolColliderCount++;
+          collider.visible = physicsVisualizationControl.displayBVH;
+
+          // 强制更新材质颜色
+          if (collider.material && collider.material.color) {
+            if (objectId.startsWith('school-door-') && !objectId.includes('nondoors')) {
+              collider.material.color.setHex(0xff0000); // 红色门
+            } else if (objectId.includes('nondoors')) {
+              collider.material.color.setHex(0x00ff00); // 绿色非门
+            }
+            collider.material.needsUpdate = true;
+          }
+
+          if (collider.visible) visibleCount++;
+        }
       });
-      console.log(`   🏢 学校建筑BVH: ${physicsVisualizationControl.displayBVH ? '显示' : '隐藏'}`);
+
+      console.log(`   🏫 学校建筑碰撞体: ${schoolColliderCount} 个，当前可见: ${visibleCount} 个`);
     }
 
     // 控制墙体的BVH可视化
@@ -450,16 +386,13 @@ gui.add(guiFn, 'forceWalk').name('播放走路动画')
 gui.add(guiFn, 'forceStand').name('播放站立动画')
 gui.add(guiFn, 'createBoxHere').name('在当前位置创建箱子')
 gui.add(guiFn, 'createFallingBoxesNow').name('创建掉落的盒子')
-gui.add(guiFn, 'showPhysicsInfo').name('显示物理信息')
-gui.add(guiFn, 'checkCollisionStatus').name('检查碰撞状态')
-gui.add(guiFn, 'checkPhysicsSync').name('检查物理同步')
 
 // 小球发射功能
 const sphereFolder = gui.addFolder('小球发射功能')
 sphereFolder.add(guiFn, 'clearSpheres').name('清理所有小球')
 sphereFolder.add(guiFn, 'getSphereCount').name('显示小球数量')
-sphereFolder.add(guiFn, 'showColliderInfo').name('显示碰撞体信息')
 sphereFolder.add(guiFn, 'toggleTreeColliders').name('切换树碰撞体显示')
+sphereFolder.add(guiFn, 'toggleDoorColliders').name('切换门碰撞体启用/禁用')
 sphereFolder.add({ info: '右键点击屏幕发射小球' }, 'info').name('使用说明').listen()
 sphereFolder.open()
 
@@ -588,33 +521,17 @@ trackFolder.add(trackTransformControl, 'syncFromTrack').name('同步GUI值')
 trackFolder.add(trackTransformControl, 'resetTrack').name('重置跑道')
 
 // 物理体可视化控制
-const physicsVisualizationFolder = gui.addFolder('物理体可视化')
-physicsVisualizationFolder.add(physicsVisualizationControl, 'showPhysicsWalls')
-  .name('显示物理墙体')
-  .onChange(() => {
-    physicsVisualizationControl.togglePhysicsVisualization();
-  })
+
 
 // BVH 可视化子文件夹（参考 characterMovement.js）
-const bvhFolder = physicsVisualizationFolder.addFolder('BVH 碰撞检测')
-bvhFolder.add(physicsVisualizationControl, 'displayCollider')
-  .name('显示碰撞体')
-  .onChange(() => {
-    physicsVisualizationControl.toggleCollider();
-  })
+const bvhFolder = gui.addFolder('BVH 碰撞检测')
 bvhFolder.add(physicsVisualizationControl, 'displayBVH')
   .name('显示BVH辅助线')
   .onChange(() => {
     physicsVisualizationControl.toggleBVH();
   })
-bvhFolder.add(physicsVisualizationControl, 'visualizeDepth', 1, 20, 1)
-  .name('BVH可视化深度')
-  .onChange(() => {
-    physicsVisualizationControl.updateBVHDepth();
-  })
 bvhFolder.open()
 
-physicsVisualizationFolder.add(physicsVisualizationControl, 'togglePhysicsVisualization').name('切换可视化')
 
 // 性能设置控制
 const performanceControl = {
@@ -683,17 +600,6 @@ onMounted(async () => {
     // 创建场景控制器
     const controls = sceneManager.createSceneControls();
 
-    // 初始化其他管理器
-    mmdModelManager = new MMDModelManager(scene, renderer, globalState);
-    testBoxManager = new TestBoxManager(scene);
-
-    // 加载模型
-    await mmdModelManager.loadModel();
-
-    // 获取相机和控制器
-    lookCamera = mmdModelManager.getLookCamera();
-    cameraControls = mmdModelManager.getCameraControls();
-
     console.log('📷 相机初始化状态:', {
       lookCamera: !!lookCamera,
       cameraControls: !!cameraControls,
@@ -719,12 +625,22 @@ onMounted(async () => {
       });
     }, 1000); // 给跑道创建一些时间
 
-    // 🔥 地面现在由 ObjectManager 管理，在 objectManager.create() 中创建
+    mmdModelManager = new MMDModelManager(scene, renderer, globalState);
+    testBoxManager = new TestBoxManager(scene);
 
-    // 🔥 设置BVH碰撞检测 - 等待所有模型加载完毕
-    setTimeout(() => {
+    // 加载模型
+    await mmdModelManager.loadModel();
+
+    // 获取相机和控制器
+    lookCamera = mmdModelManager.getLookCamera();
+    cameraControls = mmdModelManager.getCameraControls();
+
+    // 地面现在由 ObjectManager 管理，在 objectManager.create() 中创建
+
+    //设置BVH碰撞检测 - 等待所有模型加载完毕
+    nextTick(() => {
       setupBVHCollision();
-    }, 3000); // 增加等待时间，确保所有模型都已加载并添加到场景
+    }); 
 
     // 🔥 监听墙体重新创建事件，重新生成BVH碰撞体
     window.addEventListener('wallsRecreated', () => {
@@ -868,7 +784,7 @@ function animate(timestamp?: number) {
     const model = mmdModelManager.getModel();
     if (model) {
       // 使用BVH物理系统更新模型
-      model.updateMovement();
+      model.updateMovement(scene);
 
       // 更新发射的小球物理（传递相机进行视野优化）
       model.updateProjectileSpheres(1/60, hadRenderCamera);

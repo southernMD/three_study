@@ -2,6 +2,8 @@ import { BaseModel } from '@/models/architecture/BaseModel';
 import { Tree } from '@/models/architecture/Tree';
 import * as THREE from 'three';
 import { MeshBVH, MeshBVHHelper, StaticGeometryGenerator } from 'three-mesh-bvh';
+import { doors as doorNames } from '@/models/architecture/doors';
+import { doorGroups } from '@/models/architecture/doors';
 
 /**
  * BVH物理系统 - 完全基于three-mesh-bvh实现
@@ -36,7 +38,6 @@ export class BVHPhysics {
    */
   createSeparateColliders(staticObjects?: Map<string, BaseModel>): Map<string, THREE.Mesh> {
     console.log('🔧 开始创建分离的碰撞体组...');
-    debugger
     // 清理现有的分离碰撞体
     this.disposeSeparateColliders();
 
@@ -53,9 +54,18 @@ export class BVHPhysics {
 
         this.createTreeColliders(trees);
         return; // 跳过常规处理
-      }else if(objectId === 'school-building'){
-        const modelGroup = object.getModelGroup();
+      } else if (objectId === 'school-building') {
+        console.log('🏫 开始为学校建筑创建碰撞体...');
+        const schoolBuilding = object as any; // SchoolBuilding类型
+        const modelGroup = schoolBuilding.getModelGroup();
 
+        if (!modelGroup) {
+          console.warn('⚠️ 学校建筑没有模型组');
+          return;
+        }
+
+        this.createSchoolBuildingColliders(schoolBuilding, modelGroup);
+        return; // 跳过常规处理
       }
       // 常规处理：遍历模型组
       const modelGroup = object.getModelGroup();
@@ -131,6 +141,205 @@ export class BVHPhysics {
   }
 
   /**
+   * 为学校建筑创建碰撞体（非门合并，门单独处理）
+   */
+  private createSchoolBuildingColliders(_schoolBuilding: any, modelGroup: THREE.Group): void {
+    console.log('🏫 开始为学校建筑创建分离碰撞体...');
+
+    // 使用导入的门名称列表
+
+    // 分离门和非门对象
+    const nonDoorMeshes: Array<THREE.Mesh | THREE.Group> = [];
+    const doorMeshes: Array<THREE.Mesh | THREE.Group> = [];
+    const names = []
+    modelGroup.children[0].children.forEach((child: THREE.Object3D) => {
+      if (child instanceof THREE.Mesh && child.geometry || child instanceof THREE.Group) {
+        names.push(child.name)
+        
+        if (doorNames.includes(child.name)) {
+          doorMeshes.push(child);
+        } else {
+          nonDoorMeshes.push(child);
+        }
+      }
+    });
+    console.log(`📊 学校建筑对象统计:`);
+    console.log(`   非门网格: ${nonDoorMeshes.length} 个`);
+    console.log(`   门网格: ${doorMeshes.length} 个`);
+
+    // 2. 为每个门创建单独的碰撞体
+    this.createIndividualDoorColliders(doorMeshes);
+
+    this.createUnifiedNonDoorCollider(nonDoorMeshes);
+
+    console.log('✅ 学校建筑碰撞体创建完成');
+  }
+
+  /**
+   * 创建非门对象的统一碰撞体
+   */
+  private createUnifiedNonDoorCollider(nonDoorObjects: Array<THREE.Mesh | THREE.Group> = []): void {
+    console.log('🏗️ 创建非门对象统一碰撞体...');
+
+    // 创建临时组来收集非门网格
+    const nonDoorGroup = new THREE.Group();
+
+    // 深度遍历非门对象，收集所有网格
+    nonDoorObjects.forEach(obj => {
+      obj.traverse((child: THREE.Object3D) => {
+        if (child instanceof THREE.Mesh && child.geometry) {
+          // 克隆网格并应用世界变换
+          const clonedMesh = child.clone();
+          clonedMesh.geometry = child.geometry.clone();
+
+          // 应用世界变换矩阵
+          child.updateMatrixWorld(true);
+          clonedMesh.applyMatrix4(child.matrixWorld);
+
+          nonDoorGroup.add(clonedMesh);
+        }
+      });
+    });
+
+    // 使用StaticGeometryGenerator合并几何体
+    const staticGenerator = new StaticGeometryGenerator(nonDoorGroup);
+    staticGenerator.attributes = ['position'];
+
+    const mergedGeometry = staticGenerator.generate();
+    mergedGeometry.boundsTree = new MeshBVH(mergedGeometry);
+
+    // 创建统一碰撞体
+    const unifiedCollider = new THREE.Mesh(mergedGeometry);
+    unifiedCollider.name = 'SchoolBuilding_NonDoors';
+
+    // 创建绿色材质
+    const nonDoorMaterial = new THREE.MeshBasicMaterial({
+      wireframe: true,
+      opacity: 0.5,
+      transparent: true,
+      color: 0x00ff00, // 绿色表示非门区域
+      side: THREE.DoubleSide
+    });
+    unifiedCollider.material = nonDoorMaterial;
+    unifiedCollider.visible = this.params.displayCollider;
+
+    // 创建BVH可视化器
+    const visualizer = new MeshBVHHelper(unifiedCollider, this.params.visualizeDepth);
+    visualizer.visible = this.params.displayBVH;
+    visualizer.name = 'SchoolBuilding_NonDoors_Visualizer';
+
+    // 存储到映射中
+    this.colliders.set('school-building-nondoors', unifiedCollider);
+    this.visualizers.set('school-building-nondoors', visualizer);
+
+    // 添加到场景
+    this.scene.add(unifiedCollider);
+    this.scene.add(visualizer);
+
+    console.log(`✅ 非门统一碰撞体创建完成，合并了 ${nonDoorGroup.children.length} 个网格`);
+  }
+
+  /**
+   * 为每个门创建单独的碰撞体
+   */
+  private createIndividualDoorColliders(doorObjects: Array<THREE.Mesh | THREE.Group>): void {
+    console.log('🚪 为门创建单独碰撞体...');
+
+    let doorCount = 0;
+
+    doorObjects.forEach((doorObj) => {
+      console.log(`🚪 处理门对象: ${doorObj.name}`);
+
+      const doorId = `school-door-${doorObj.name}`;
+
+      // 检查是否已经存在，避免重复创建
+      if (this.colliders.has(doorId)) {
+        console.log(`⚠️ 门碰撞体已存在，跳过: ${doorObj.name}`);
+        return;
+      }
+
+      // 创建临时组来收集门的所有网格
+      const doorGroup = new THREE.Group();
+      let meshCount = 0;
+
+      // 深度遍历门对象，收集所有网格
+      doorObj.traverse((child: THREE.Object3D) => {
+        if (child instanceof THREE.Mesh && child.geometry) {
+          // 克隆网格并应用世界变换
+          const clonedMesh = child.clone();
+          clonedMesh.geometry = child.geometry.clone();
+
+          // 应用世界变换矩阵
+          child.updateMatrixWorld(true);
+          clonedMesh.applyMatrix4(child.matrixWorld);
+
+          doorGroup.add(clonedMesh);
+          meshCount++;
+        }
+      });
+
+      if (doorGroup.children.length === 0) {
+        console.warn(`⚠️ 门对象没有找到网格: ${doorObj.name}`);
+        return;
+      }
+
+      // 使用StaticGeometryGenerator合并门的几何体
+      const staticGenerator = new StaticGeometryGenerator(doorGroup);
+      staticGenerator.attributes = ['position'];
+
+      const mergedGeometry = staticGenerator.generate();
+      mergedGeometry.boundsTree = new MeshBVH(mergedGeometry);
+
+      // 创建门碰撞体
+      const doorCollider = new THREE.Mesh(mergedGeometry);
+      doorCollider.name = `DoorCollider_${doorObj.name}`;
+
+      // 创建红色材质
+      const doorMaterial = new THREE.MeshBasicMaterial({
+        wireframe: true,
+        opacity: 0.5,
+        transparent: true,
+        color: 0xff0000, // 红色表示门
+        side: THREE.DoubleSide
+      });
+      doorCollider.material = doorMaterial;
+      doorCollider.visible = this.params.displayCollider;
+
+      // 创建BVH可视化器
+      const visualizer = new MeshBVHHelper(doorCollider, this.params.visualizeDepth);
+      visualizer.visible = this.params.displayBVH;
+      visualizer.name = `DoorVisualizer_${doorObj.name}`;
+      // 设置门的userData
+      const doorData = doorGroups.get(doorObj.name);
+      const isOpen = doorData?.[1] || false;
+
+      doorCollider.userData = {
+        isOpen: isOpen,
+        doorName: doorObj.name,
+        doorType: doorData?.[2] || ""
+      };
+
+      console.log(`🚪 设置门userData: ${doorObj.name}`, {
+        doorData: doorData,
+        isOpen: isOpen,
+        userData: doorCollider.userData
+      });
+      // 存储到映射中
+      this.colliders.set(doorId, doorCollider);
+      this.visualizers.set(doorId, visualizer);
+
+      // 添加到场景
+      this.scene.add(doorCollider);
+      this.scene.add(visualizer);
+
+      console.log(`✅ 门碰撞体创建完成: ${doorObj.name} (合并了 ${meshCount} 个网格)`);
+      doorCount++;
+    });
+
+    console.log(`🚪 所有门碰撞体创建完成，共处理 ${doorCount} 个门对象`);
+  }
+
+  /**
    * 为所有树创建简单盒模型碰撞体
    */
   private createTreeColliders(trees: THREE.Object3D[]): void {
@@ -171,7 +380,6 @@ export class BVHPhysics {
       if (tree.scale) {
         treeCollider.scale.copy(tree.scale);
       }
-      debugger
       // 创建BVH可视化器
       const visualizer = new MeshBVHHelper(treeCollider, this.params.visualizeDepth);
       visualizer.visible = this.params.displayBVH;

@@ -14,6 +14,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router';
+import mountKeyBoardMessageBox from '@/ImperativeComponents/keyBoardMessage.tsx'
 const $router = useRouter()
 const list = ref([
   "正交相机单立方",
@@ -72,8 +73,7 @@ const goPage = (index: number) => {
     name: 'hello_thress_' + (index + 1)
   })
 }
-onMounted(() => {
-})
+onMounted(() => {})
 </script>
 
 <style scoped lang="less">
