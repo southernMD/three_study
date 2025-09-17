@@ -4,7 +4,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GlobalState } from '../types/GlobalState';
 import { BVHPhysics } from '../physics/BVHPhysics';
 import { Ball } from './Ball';
-import mountKeyBoardMessageBox from '@/ImperativeComponents/keyBoardMessage';
+import { KeyBoardMessageManager } from '@/ImperativeComponents/keyBoardMessage';
+import { doorGroups } from './architecture/doors';
 // 基础模型类 - 完全基于BVH物理系统
 export abstract class Model {
   abstract mesh: THREE.Object3D;
@@ -30,10 +31,6 @@ export abstract class Model {
   private playerVelocity = new THREE.Vector3();
   private upVector = new THREE.Vector3(0, 1, 0);
   private delta = 0.016;
-
-  // school-building-G检测相关
-  private lastSchoolBuildingGCheck: number = 0;
-  private schoolBuildingGCheckInterval: number = 1000; // 1秒检测一次
 
   // 碰撞相关
   protected playerCapsule?: Capsule;
@@ -79,6 +76,11 @@ export abstract class Model {
     sphereSize: 1,
     maxSpheres: 50 // 最大小球数量，防止内存泄漏
   };
+
+  //门与模型缓存
+  private mapDoorNameMesh: Map<string, THREE.Mesh> = new Map();
+  // 门与模型缓存
+
 
   constructor(globalState: GlobalState) {
     this.globalState = globalState;
@@ -469,7 +471,6 @@ export abstract class Model {
     // 对每个分离的碰撞体进行检测
     colliders.forEach((collider, objectId) => {
       if (!collider.geometry || !(collider.geometry as any).boundsTree) return;
-      if (objectId.startsWith("school-door-G") && collider.userData?.isOpen === true)return;
       // 重置临时变量
       tempBox.makeEmpty();
       tempMat.copy(collider.matrixWorld).invert();
@@ -495,11 +496,13 @@ export abstract class Model {
         intersectsBounds: (box: THREE.Box3) => box.intersectsBox(tempBox),
 
         intersectsTriangle: (tri: any) => {
+
           const triPoint = this.tempVector;
           const capsulePoint = this.tempVector2;
 
           const distance = tri.closestPointToSegment(tempSegment, triPoint, capsulePoint);
           if (distance < capsuleInfo.radius) {
+            if (objectId.startsWith("school-door-G") && collider.userData?.isOpen === true)return;
             const depth = capsuleInfo.radius - distance;
             const direction = capsulePoint.sub(triPoint).normalize();
 
@@ -507,23 +510,78 @@ export abstract class Model {
             tempSegment.end.addScaledVector(direction, depth);
             colliderHasCollision = true;
           }else{
+            const doorName = objectId.split('school-door-')[1];
+            const doorNearName = doorGroups.get(doorName)?.[0] as string;
             if(objectId.startsWith('school-door-G') && distance < 10){
               // 先找到要删除的对象
-              const doorName = objectId.split('school-door-')[1];
-              //直接开门,然后把门隐藏
-              screen.traverse((child) => {
-                if(child.name === doorName){
-                  child.visible = false;
+                // 只在没有活跃实例或当前门不同且不是当前门的相邻门时才显示提示
+                if(!KeyBoardMessageManager.isActive() ||
+                 KeyBoardMessageManager.getActiveMeshName() !== doorName &&
+                 KeyBoardMessageManager.getActiveMeshName() !== doorNearName
+                ){
                   if(collider.userData.isOpen === false){
-                    mountKeyBoardMessageBox({
+                    KeyBoardMessageManager.show({
                       targetKey: 'F',
-                      message: '我是一个弹出窗',
-                      visible:true
-                    })
-                    // collider.userData.isOpen = true;
+                      message: '打开门',
+                      visible: true,
+                      hideDelay: 2000,
+                      activeMeshName:doorName,
+                      onKeyPress:()=>{
+                        collider.userData.isOpen = true;
+                        if(doorNearName) colliders.get(`school-door-${doorNearName}`)!.userData.isOpen = true;
+                        const child = this.mapDoorNameMesh.get(doorName)
+                        const childNear = this.mapDoorNameMesh.get(doorNearName)
+                        if(child)child.visible = false
+                        if(childNear)childNear.visible = false
+                        if(!child || !childNear){
+                          screen.traverse((child) => {
+                            if(child.name === doorName){
+                              child.visible = false;
+                              this.mapDoorNameMesh.set(doorName,child as THREE.Mesh)
+                            }else if(child.name === doorNearName){
+                              child.visible = false;
+                              this.mapDoorNameMesh.set(doorNearName,child as THREE.Mesh)
+                            }
+                          });
+                        }
+                      }
+                    });
+                  }else{
+                    KeyBoardMessageManager.show({
+                      targetKey: 'F',
+                      message: '关上门',
+                      visible: true,
+                      hideDelay: 2000,
+                      activeMeshName:doorName,
+                      onKeyPress:()=>{
+                        collider.userData.isOpen = false;
+                        if(doorNearName) colliders.get(`school-door-${doorNearName}`)!.userData.isOpen = false;
+                        const child = this.mapDoorNameMesh.get(doorName)
+                        const childNear = this.mapDoorNameMesh.get(doorNearName)
+                        if(child)child.visible = true
+                        if(childNear)childNear.visible = true
+                        if(!child || !childNear){
+                          screen.traverse((child) => {
+                            if(child.name === doorName){
+                              child.visible = true;
+                              this.mapDoorNameMesh.set(doorName,child as THREE.Mesh)
+                            }else if(child.name === doorNearName){
+                              child.visible = true;
+                              this.mapDoorNameMesh.set(doorNearName,child as THREE.Mesh)
+                            }
+                          });
+                        }
+                      }
+                    });
                   }
                 }
-              });
+            }else if(KeyBoardMessageManager.isActive() && distance >= 20){
+              const activeMeshName = KeyBoardMessageManager.getActiveMeshName();
+              const correspondingDoor = activeMeshName ? doorGroups.get(activeMeshName)?.[0] : undefined;
+              if(doorName === activeMeshName || (correspondingDoor && doorName === correspondingDoor)){
+                KeyBoardMessageManager.hide();
+                KeyBoardMessageManager.setActiveMeshName('');
+              }
             }
           }
         }

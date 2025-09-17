@@ -7,6 +7,7 @@ interface KeyBoardMessageProps {
   visible?: boolean // 是否显示
   onKeyPress?: () => void // 按键触发事件
   hideDelay?: number // 自动隐藏延迟(ms)
+  activeMeshName: string
 }
 
 // 样式定义
@@ -195,26 +196,52 @@ if (typeof window !== 'undefined') {
   injectStyles()
 }
 
+// 单例管理
+let currentInstance: {
+  app: any;
+  div: HTMLElement;
+  destroy: () => void;
+  update: (newProps: Partial<KeyBoardMessageProps>) => void;
+  activeMeshName: string;
+} | null = null;
+
 export default function mountKeyBoardMessageBox(props: KeyBoardMessageProps = {
     targetKey: '', // 提供默认值
     message: '',   // 提供默认值
-    hideDelay: 3000
+    hideDelay: 3000,
+    activeMeshName:''
 }) {
+    // 如果已经存在实例，跳过创建
+    if (currentInstance) {
+        console.log('⚠️ KeyBoardMessageBox实例已存在，跳过创建，只更新属性');
+        return ;
+    }
+
+    console.log('🆕 创建新的KeyBoardMessageBox实例');
+
     const div = document.createElement('div');
     document.body.appendChild(div);
+
+    // 创建响应式的props
+    const reactiveProps = ref(props);
+
     const app = createApp({
         setup() {
             const handleClose = () => {
-                app.unmount();
-                document.body.removeChild(div);
+                if (currentInstance) {
+                    currentInstance.destroy();
+                    currentInstance = null;
+                }
             };
+
             // 确保传递所有必需的属性
             return () => (
                 <KeyBoardMessageBox
-                    targetKey={props.targetKey}
-                    message={props.message}
-                    onKeyPress={props.onKeyPress}
-                    hideDelay={props.hideDelay}
+                    targetKey={reactiveProps.value.targetKey}
+                    message={reactiveProps.value.message}
+                    visible={reactiveProps.value.visible}
+                    onKeyPress={reactiveProps.value.onKeyPress}
+                    hideDelay={reactiveProps.value.hideDelay}
                     onClose={handleClose}
                 />
             )
@@ -223,10 +250,107 @@ export default function mountKeyBoardMessageBox(props: KeyBoardMessageProps = {
 
     app.mount(div);
 
-    return {
+    // 创建实例对象
+    const instance = {
+        app,
+        div,
         destroy: () => {
+            console.log('🗑️ 销毁KeyBoardMessageBox实例');
             app.unmount();
-            document.body.removeChild(div);
-        }
+            if (div.parentNode) {
+                document.body.removeChild(div);
+            }
+        },
+        update: (newProps: Partial<KeyBoardMessageProps>) => {
+            console.log('🔄 更新KeyBoardMessageBox属性', newProps);
+            reactiveProps.value = { ...reactiveProps.value, ...newProps };
+        },
+        activeMeshName:reactiveProps.value.activeMeshName
     };
+
+    // 保存当前实例
+    currentInstance = instance;
+    console.log('✅ 创建新的KeyBoardMessageBox实例');
+
+    return instance;
 }
+
+// 强制创建新实例（销毁现有实例）
+export function forceCreateKeyBoardMessageBox(props: KeyBoardMessageProps = {
+    targetKey: '',
+    message: '',
+    hideDelay: 3000,
+    activeMeshName: ''
+}) {
+    // 强制销毁现有实例
+    if (currentInstance) {
+        console.log('🔄 强制销毁现有的KeyBoardMessageBox实例');
+        currentInstance.destroy();
+        currentInstance = null;
+    }
+
+    // 创建新实例
+    console.log('✅ 强制创建新的KeyBoardMessageBox实例');
+    return mountKeyBoardMessageBox(props);
+}
+
+// 便捷的全局管理函数
+export const KeyBoardMessageManager = {
+  // 显示消息框（如果已存在则跳过创建，只更新属性）
+  show: (props: KeyBoardMessageProps) => {
+    return mountKeyBoardMessageBox(props);
+  },
+
+  // 强制创建新消息框（销毁现有实例）
+  forceCreate: (props: KeyBoardMessageProps) => {
+    return forceCreateKeyBoardMessageBox(props);
+  },
+
+  // 更新当前消息框
+  update: (props: Partial<KeyBoardMessageProps>) => {
+    if (currentInstance) {
+      currentInstance.update(props);
+    } else {
+      console.warn('⚠️ 没有活跃的KeyBoardMessageBox实例可以更新');
+    }
+  },
+
+  // 隐藏/销毁当前消息框
+  hide: () => {
+    if (currentInstance) {
+      currentInstance.destroy();
+      currentInstance = null;
+    }
+  },
+
+  // 检查是否有活跃实例
+  isActive: () => {
+    return currentInstance !== null;
+  },
+
+  // 获取当前实例
+  getInstance: () => {
+    return currentInstance;
+  },
+
+  // 安全显示（如果没有实例则创建，如果有实例则更新）
+  safeShow: (props: KeyBoardMessageProps) => {
+    if (currentInstance) {
+      console.log('📝 更新现有KeyBoardMessageBox实例');
+      currentInstance.update(props);
+      return currentInstance;
+    } else {
+      console.log('🆕 创建新的KeyBoardMessageBox实例');
+      return mountKeyBoardMessageBox(props);
+    }
+  },
+
+  getActiveMeshName: () => {
+    return currentInstance?.activeMeshName;
+  },
+  setActiveMeshName: (name:string) => {
+    if (currentInstance) {
+      currentInstance.activeMeshName = name;
+    }
+  },
+};
