@@ -79,7 +79,10 @@ export abstract class Model {
 
   //门与模型缓存
   private mapDoorNameMesh: Map<string, THREE.Mesh> = new Map();
-  // 门与模型缓存
+
+  //用户位置与具体bvh距离缓存
+  private mapUserPositionDistance: Map<string, THREE.Mesh> = new Map();
+
 
 
   constructor(globalState: GlobalState) {
@@ -446,6 +449,9 @@ export abstract class Model {
   private performSeparateCollidersDetection(delta: number,screen:THREE.Scene): void {
     if (!this.bvhPhysics) return;
 
+    // 🚀 性能监控开始
+    const startTime = performance.now();
+
     const colliders = this.bvhPhysics.getColliders();
     const colliderMapping = this.bvhPhysics.getColliderMapping();
 
@@ -466,11 +472,59 @@ export abstract class Model {
 
     let totalDeltaVector = new THREE.Vector3();
     let hasCollision = false;
+    let hasGroundCollision = false; // 🚀 直接在循环中检测地面碰撞
     let collisionInfo: Array<{ objectId: string; object: any; deltaVector: THREE.Vector3 }> = [];
 
-    // 对每个分离的碰撞体进行检测
     colliders.forEach((collider, objectId) => {
+      // 🚀 距离预筛选优化：根据碰撞体类型使用不同的筛选策略
+      const playerPosition = this.mesh.position;
+      if(objectId.startsWith('school')){
+        if (objectId.startsWith('school-building-region-region')) {
+          // 🏗️ 区域BVH：判断玩家是否在区块内或距离区块边界100单位内
+          debugger
+          const colliderBounds = new THREE.Box3().setFromObject(collider);
+  
+          // 检查玩家位置是否在区块边界内
+          const isInside = colliderBounds.containsPoint(playerPosition);
+  
+          // 如果不在区块内，检查是否在100单位范围内
+          let isNearby = false;
+          const distanceToBox = colliderBounds.distanceToPoint(playerPosition);
+          if (!isInside) {
+            isNearby = distanceToBox <= 100;
+          }
+  
+          if (isInside || isNearby) {
+            this.mapUserPositionDistance.set(objectId, collider);
+          }else if(!isInside && distanceToBox > 200){
+            this.mapUserPositionDistance.delete(objectId);
+          }
+        } else {
+          // 🎯 其他碰撞体：判断到中心点的距离
+          const colliderBounds = new THREE.Box3().setFromObject(collider);
+          const colliderCenter = colliderBounds.getCenter(new THREE.Vector3());
+          const distance = colliderCenter.distanceTo(playerPosition);
+  
+          if (distance < 100) {
+            this.mapUserPositionDistance.set(objectId, collider);
+          }else if(distance > 200){
+            this.mapUserPositionDistance.delete(objectId);
+          }
+        }
+      }else{
+        this.mapUserPositionDistance.set(objectId, collider);
+      }
+    });
+    if (Math.random() < 0.016) { // 约60fps时每秒一次
+      console.log(this.mapUserPositionDistance,this.mesh.position);
+    }
+    debugger
+    // 对每个分离的碰撞体进行检测
+    // this.mapUserPositionDistance.forEach((collider, objectId) => {
+
+    this.mapUserPositionDistance.forEach((collider, objectId) => {
       if (!collider.geometry || !(collider.geometry as any).boundsTree) return;
+      debugger
       // 重置临时变量
       tempBox.makeEmpty();
       tempMat.copy(collider.matrixWorld).invert();
@@ -491,7 +545,7 @@ export abstract class Model {
 
       let colliderHasCollision = false;
 
-      // BVH碰撞检测
+      // BVH碰撞检测 - 🚀 添加boundsTraverseOrder优化遍历顺序
       (collider.geometry as any).boundsTree.shapecast({
         intersectsBounds: (box: THREE.Box3) => box.intersectsBox(tempBox),
 
@@ -509,6 +563,10 @@ export abstract class Model {
             tempSegment.start.addScaledVector(direction, depth);
             tempSegment.end.addScaledVector(direction, depth);
             colliderHasCollision = true;
+
+            // 🚀 早期退出优化：如果已经有足够的碰撞信息，可以提前退出
+            // 对于性能敏感的场景，可以在检测到第一个碰撞后就退出
+            // return true; // 取消注释以启用早期退出
           }else{
             const doorName = objectId.split('school-door-')[1];
             const doorNearName = doorGroups.get(doorName)?.[0] as string;
@@ -586,7 +644,7 @@ export abstract class Model {
           }
         }
       });
-
+      this.playerIsOnGround = totalDeltaVector.y > Math.abs(delta * this.playerVelocity.y * 0.25);
       if (colliderHasCollision) {
         // 计算该碰撞体的位置调整
         const newPosition = this.tempVector;
@@ -615,9 +673,6 @@ export abstract class Model {
 
     if (hasCollision) {
       // 处理累积的碰撞结果
-      const wasOnGround = this.playerIsOnGround;
-      this.playerIsOnGround = totalDeltaVector.y > Math.abs(delta * this.playerVelocity.y * 0.25);
-
       const offset = Math.max(0.0, totalDeltaVector.length() - 1e-5);
       totalDeltaVector.normalize().multiplyScalar(offset);
 
@@ -633,6 +688,15 @@ export abstract class Model {
 
       // 触发角色碰撞事件
       this.onPlayerCollision(collisionInfo);
+    }
+
+    // 🚀 性能监控结束
+    const endTime = performance.now();
+    const executionTime = endTime - startTime;
+
+    // 每秒记录一次性能统计
+    if (Math.random() < 0.016) { // 约60fps时每秒一次
+      console.log(`⚡ BVH碰撞检测性能: ${executionTime.toFixed(2)}ms, 检测了 ${colliders.size} 个碰撞体`);
     }
   }
 

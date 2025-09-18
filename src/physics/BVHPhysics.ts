@@ -176,72 +176,290 @@ export class BVHPhysics {
   }
 
   /**
-   * 创建非门对象的统一碰撞体
+   * 创建非门对象的分区域碰撞体
    */
   private createUnifiedNonDoorCollider(nonDoorObjects: Array<THREE.Mesh | THREE.Group> = []): void {
-    console.log('🏗️ 创建非门对象统一碰撞体...');
+    console.log('🏗️ 创建非门对象分区域碰撞体...');
 
-    // 创建临时组来收集非门网格
-    const nonDoorGroup = new THREE.Group();
+    // 收集所有网格及其位置信息
+    const meshes: Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }> = [];
 
     // 深度遍历非门对象，收集所有网格
     nonDoorObjects.forEach(obj => {
       obj.traverse((child: THREE.Object3D) => {
         if (child instanceof THREE.Mesh && child.geometry) {
-          // 克隆网格并应用世界变换
+          // 🚀 修复：不应用世界变换，保持原始几何体
           const clonedMesh = child.clone();
           clonedMesh.geometry = child.geometry.clone();
 
-          // 应用世界变换矩阵
+          // 🚀 修复：直接使用原始网格的世界位置来计算包围盒
           child.updateMatrixWorld(true);
+          const bounds = new THREE.Box3().setFromObject(child);
+          const center = bounds.getCenter(new THREE.Vector3());
+
+          // 🚀 修复：应用世界变换到几何体，但保持网格在原位置
           clonedMesh.applyMatrix4(child.matrixWorld);
 
-          nonDoorGroup.add(clonedMesh);
+          meshes.push({
+            mesh: clonedMesh,
+            position: center, // 使用原始位置进行分区
+            bounds: bounds    // 使用原始包围盒进行分区
+          });
         }
       });
     });
 
+    console.log(`📊 收集到 ${meshes.length} 个网格，开始分区域处理...`);
+
+    // 🚀 分区域参数配置
+    const regionConfig = {
+      gridSize: 150, // 每个区域的大小 (100x100单位) - 增大区域避免过度分割
+      maxMeshesPerRegion: 50, // 每个区域最大网格数量
+      minMeshesPerRegion: 5   // 每个区域最小网格数量
+    };
+
+    // 计算整体边界
+    const overallBounds = new THREE.Box3();
+    meshes.forEach(item => overallBounds.union(item.bounds));
+
+    // 🚀 调试：打印整体边界信息
+    console.log(`🗺️ 整体边界:`, {
+      min: overallBounds.min,
+      max: overallBounds.max,
+      size: {
+        x: overallBounds.max.x - overallBounds.min.x,
+        y: overallBounds.max.y - overallBounds.min.y,
+        z: overallBounds.max.z - overallBounds.min.z
+      }
+    });
+
+    // 创建区域网格
+    const regions = this.createSpatialRegions(meshes, overallBounds, regionConfig);
+
+    console.log(`🗺️ 创建了 ${regions.size} 个空间区域`);
+
+    // 为每个区域创建BVH碰撞体
+    let totalRegions = 0;
+    regions.forEach((regionMeshes, regionKey) => {
+      if (regionMeshes.length >= regionConfig.minMeshesPerRegion) {
+        this.createRegionBVHCollider(regionKey, regionMeshes, totalRegions);
+        totalRegions++;
+      } else {
+        // 将小区域合并到相邻区域
+        this.mergeSmallRegion(regionKey, regionMeshes, regions, regionConfig);
+      }
+    });
+
+    console.log(`✅ 非门分区域碰撞体创建完成，共创建了 ${totalRegions} 个区域BVH`);
+  }
+
+  /**
+   * 创建空间区域网格，将网格按空间位置分组
+   */
+  private createSpatialRegions(
+    meshes: Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>,
+    overallBounds: THREE.Box3,
+    config: { gridSize: number; maxMeshesPerRegion: number; minMeshesPerRegion: number }
+  ): Map<string, Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>> {
+
+    const regions = new Map<string, Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>>();
+
+    // 计算网格尺寸
+    const min = overallBounds.min;
+    const max = overallBounds.max;
+    const gridCountX = Math.ceil((max.x - min.x) / config.gridSize);
+    const gridCountZ = Math.ceil((max.z - min.z) / config.gridSize);
+
+    console.log(`📐 空间网格: ${gridCountX} x ${gridCountZ}, 网格大小: ${config.gridSize}`);
+
+    // 将每个网格分配到对应的区域
+    meshes.forEach(item => {
+      const gridX = Math.floor((item.position.x - min.x) / config.gridSize);
+      const gridZ = Math.floor((item.position.z - min.z) / config.gridSize);
+
+      // 确保索引在有效范围内
+      const clampedX = Math.max(0, Math.min(gridCountX - 1, gridX));
+      const clampedZ = Math.max(0, Math.min(gridCountZ - 1, gridZ));
+
+      const regionKey = `region_${clampedX}_${clampedZ}`;
+
+      if (!regions.has(regionKey)) {
+        regions.set(regionKey, []);
+      }
+
+      regions.get(regionKey)!.push(item);
+    });
+
+    // 处理过大的区域，进一步细分
+    const finalRegions = new Map<string, Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>>();
+
+    regions.forEach((regionMeshes, regionKey) => {
+      if (regionMeshes.length > config.maxMeshesPerRegion) {
+        // 进一步细分大区域
+        const subRegions = this.subdivideRegion(regionKey, regionMeshes, config.maxMeshesPerRegion);
+        subRegions.forEach((subMeshes, subKey) => {
+          finalRegions.set(subKey, subMeshes);
+        });
+      } else {
+        finalRegions.set(regionKey, regionMeshes);
+      }
+    });
+
+    return finalRegions;
+  }
+
+  /**
+   * 细分过大的区域
+   */
+  private subdivideRegion(
+    regionKey: string,
+    meshes: Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>,
+    maxMeshesPerRegion: number
+  ): Map<string, Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>> {
+
+    const subRegions = new Map<string, Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>>();
+
+    // 计算该区域的边界
+    const regionBounds = new THREE.Box3();
+    meshes.forEach(item => regionBounds.union(item.bounds));
+
+    // 按位置进一步细分为4个子区域
+    const center = regionBounds.getCenter(new THREE.Vector3());
+
+    meshes.forEach((item, index) => {
+      const pos = item.position;
+      let subKey = regionKey;
+
+      // 根据相对于中心的位置确定子区域
+      if (pos.x < center.x && pos.z < center.z) {
+        subKey += '_sw'; // 西南
+      } else if (pos.x >= center.x && pos.z < center.z) {
+        subKey += '_se'; // 东南
+      } else if (pos.x < center.x && pos.z >= center.z) {
+        subKey += '_nw'; // 西北
+      } else {
+        subKey += '_ne'; // 东北
+      }
+
+      if (!subRegions.has(subKey)) {
+        subRegions.set(subKey, []);
+      }
+
+      subRegions.get(subKey)!.push(item);
+    });
+
+    console.log(`🔄 区域 ${regionKey} 细分为 ${subRegions.size} 个子区域`);
+    return subRegions;
+  }
+
+  /**
+   * 为单个区域创建BVH碰撞体
+   */
+  private createRegionBVHCollider(
+    regionKey: string,
+    meshes: Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>,
+    regionIndex: number
+  ): void {
+    console.log(`🏗️ 创建区域 ${regionKey} 的BVH碰撞体，包含 ${meshes.length} 个网格`);
+
+    // 创建临时组来收集该区域的网格
+    const regionGroup = new THREE.Group();
+    meshes.forEach(item => {
+      regionGroup.add(item.mesh);
+    });
+
     // 使用StaticGeometryGenerator合并几何体
-    const staticGenerator = new StaticGeometryGenerator(nonDoorGroup);
+    const staticGenerator = new StaticGeometryGenerator(regionGroup);
     staticGenerator.attributes = ['position'];
 
     const mergedGeometry = staticGenerator.generate();
     mergedGeometry.boundsTree = new MeshBVH(mergedGeometry);
 
-    // 创建统一碰撞体
-    const unifiedCollider = new THREE.Mesh(mergedGeometry);
-    unifiedCollider.name = 'SchoolBuilding_NonDoors';
+    // 创建区域碰撞体
+    const regionCollider = new THREE.Mesh(mergedGeometry);
+    regionCollider.name = `SchoolBuilding_Region_${regionKey}`;
 
-    // 创建绿色材质
-    const nonDoorMaterial = new THREE.MeshBasicMaterial({
+    // 🚀 修复：确保碰撞体位置在原点，因为几何体已经应用了世界变换
+    regionCollider.position.set(0, 0, 0);
+    regionCollider.rotation.set(0, 0, 0);
+    regionCollider.scale.set(1, 1, 1);
+
+    // 创建区域特定的颜色材质
+    const colors = [0x00ff00, 0x0080ff, 0xff8000, 0xff0080, 0x80ff00, 0x8000ff];
+    const colorIndex = regionIndex % colors.length;
+
+    const regionMaterial = new THREE.MeshBasicMaterial({
       wireframe: true,
-      opacity: 0.5,
+      opacity: 0.4,
       transparent: true,
-      color: 0x00ff00, // 绿色表示非门区域
+      color: colors[colorIndex],
       side: THREE.DoubleSide
     });
-    unifiedCollider.material = nonDoorMaterial;
-    unifiedCollider.visible = this.params.displayCollider;
+    regionCollider.material = regionMaterial;
+    regionCollider.visible = this.params.displayCollider;
 
     // 创建BVH可视化器
-    const visualizer = new MeshBVHHelper(unifiedCollider, this.params.visualizeDepth);
+    const visualizer = new MeshBVHHelper(regionCollider, this.params.visualizeDepth);
     visualizer.visible = this.params.displayBVH;
-    visualizer.name = 'SchoolBuilding_NonDoors_Visualizer';
+    visualizer.name = `${regionCollider.name}_Visualizer`;
 
     // 存储到映射中
-    this.colliders.set('school-building-nondoors', unifiedCollider);
-    this.visualizers.set('school-building-nondoors', visualizer);
+    const colliderKey = `school-building-region-${regionKey}`;
+    this.colliders.set(colliderKey, regionCollider);
+    this.visualizers.set(colliderKey, visualizer);
 
     // 添加到场景
-    this.scene.add(unifiedCollider);
+    this.scene.add(regionCollider);
     this.scene.add(visualizer);
 
-    console.log(`✅ 非门统一碰撞体创建完成，合并了 ${nonDoorGroup.children.length} 个网格`);
+    console.log(`✅ 区域 ${regionKey} BVH碰撞体创建完成`);
   }
 
   /**
-   * 为每个门创建单独的碰撞体
+   * 合并小区域到相邻区域
    */
+  private mergeSmallRegion(
+    regionKey: string,
+    meshes: Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>,
+    regions: Map<string, Array<{ mesh: THREE.Mesh; position: THREE.Vector3; bounds: THREE.Box3 }>>,
+    config: { gridSize: number; maxMeshesPerRegion: number; minMeshesPerRegion: number }
+  ): void {
+    console.log(`🔗 合并小区域 ${regionKey} (${meshes.length} 个网格)`);
+
+    // 找到最近的相邻区域
+    let bestNeighborKey = '';
+    let minDistance = Infinity;
+
+    // 计算当前小区域的中心
+    const smallRegionBounds = new THREE.Box3();
+    meshes.forEach(item => smallRegionBounds.union(item.bounds));
+    const smallRegionCenter = smallRegionBounds.getCenter(new THREE.Vector3());
+
+    // 寻找最近的相邻区域
+    regions.forEach((neighborMeshes, neighborKey) => {
+      if (neighborKey === regionKey || neighborMeshes.length >= config.maxMeshesPerRegion) return;
+
+      const neighborBounds = new THREE.Box3();
+      neighborMeshes.forEach(item => neighborBounds.union(item.bounds));
+      const neighborCenter = neighborBounds.getCenter(new THREE.Vector3());
+
+      const distance = smallRegionCenter.distanceTo(neighborCenter);
+      if (distance < minDistance) {
+        minDistance = distance;
+        bestNeighborKey = neighborKey;
+      }
+    });
+
+    // 合并到最近的相邻区域
+    if (bestNeighborKey) {
+      const neighborMeshes = regions.get(bestNeighborKey)!;
+      neighborMeshes.push(...meshes);
+      console.log(`✅ 小区域 ${regionKey} 已合并到 ${bestNeighborKey}`);
+    } else {
+      console.log(`⚠️ 无法找到合适的相邻区域来合并 ${regionKey}`);
+    }
+  }
+
   private createIndividualDoorColliders(doorObjects: Array<THREE.Mesh | THREE.Group>): void {
     console.log('🚪 为门创建单独碰撞体...');
 
