@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GridHelper } from 'three/src/helpers/GridHelper.js';
 import { GlobalState } from '../../types/GlobalState';
+import { EXRLoader } from 'three/examples/jsm/Addons.js';
 
 /**
  * SceneManager类 - 专门管理场景的类
@@ -36,6 +37,7 @@ export class SceneManager {
     // 创建坐标轴辅助器
     this.axesHelper = new THREE.AxesHelper(150);
     this.scene.add(this.axesHelper);
+    this.createSkyBox();
   }
 
   /**
@@ -71,9 +73,6 @@ export class SceneManager {
     this.renderer.shadowMap.enabled = false; // 关闭阴影可以提高性能
     this.renderer.localClippingEnabled = true;
     
-    // 启用物理正确的光照模型
-    this.renderer.physicallyCorrectLights = false;
-    
     domElement.appendChild(this.renderer.domElement);
     this.renderer.render(this.scene, this.camera);
     
@@ -93,31 +92,90 @@ export class SceneManager {
   }
 
   /**
+   * 创建天空图
+   */
+  createSkyBox(): void {
+    const loader = new EXRLoader();
+    loader.load('/model/background.exr', (texture) => {
+      const pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+      const envMap = pmremGenerator.fromEquirectangular(texture).texture;
+      
+      // 通过调整曝光来控制整体亮度
+      this.renderer.toneMappingExposure = 0.1; // 降低曝光
+      
+      this.scene.environment = envMap;
+      this.scene.background = texture;
+      
+      pmremGenerator.dispose();
+    }, undefined, (error) => {
+        console.error('EXR加载失败:', error);
+    });
+  }
+
+  /**
    * 初始化灯光
    */
   initializeLights(): void {
-    // 主光源（白色，高强度）
-    this.mainLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    // 🌅 针对天空图环境优化的光照设置
+
+    // 主光源（模拟太阳光，降低强度避免过曝）
+    this.mainLight = new THREE.DirectionalLight(0xfff4e6, 0.6); // 暖白色，降低强度
     this.mainLight.position.set(10, 200, 100);
-    this.mainLight.castShadow = false; // 禁用阴影以提高性能
-    
+    // this.mainLight.castShadow = false; // 禁用阴影以提高性能
+
     // 优化阴影设置 - 如果需要阴影，可以使用这些设置
     // this.mainLight.castShadow = true;
     // this.mainLight.shadow.mapSize.width = 512; // 降低阴影贴图分辨率
     // this.mainLight.shadow.mapSize.height = 512;
     // this.mainLight.shadow.camera.near = 0.5;
     // this.mainLight.shadow.camera.far = 500;
-    
+
     this.scene.add(this.mainLight);
 
-    // 环境光（柔和补光）
-    this.ambientLight = new THREE.AmbientLight(0x404040, 0.8);
+    // 🌟 增强环境光来提亮暗部区域
+    this.ambientLight = new THREE.AmbientLight(0x87ceeb, 1.2); // 天空蓝色调，增强强度
     this.scene.add(this.ambientLight);
+
+    // 🌙 添加补充光源来平衡阴影区域
+    const fillLight = new THREE.DirectionalLight(0xb3d9ff, 0.3); // 冷色调补光
+    fillLight.position.set(-50, 100, -50); // 从另一个方向照射
+    this.scene.add(fillLight);
 
     // 移除点光源以提高性能
     // this.pointLight = new THREE.PointLight(0xffffff, 0.5, 500);
     // this.pointLight.position.set(50, 50, 50);
     // this.scene.add(this.pointLight);
+  }
+
+  /**
+   * 🎨 动态调整光照强度（用于天空图环境微调）
+   */
+  adjustLightingForSkybox(options: {
+    mainLightIntensity?: number;
+    ambientLightIntensity?: number;
+    fillLightIntensity?: number;
+  }): void {
+    if (this.mainLight && options.mainLightIntensity !== undefined) {
+      this.mainLight.intensity = options.mainLightIntensity;
+    }
+
+    if (this.ambientLight && options.ambientLightIntensity !== undefined) {
+      this.ambientLight.intensity = options.ambientLightIntensity;
+    }
+
+    // 查找补充光源并调整
+    if (options.fillLightIntensity !== undefined) {
+      const fillLight = this.scene.children.find(child =>
+        child instanceof THREE.DirectionalLight &&
+        child !== this.mainLight
+      ) as THREE.DirectionalLight;
+
+      if (fillLight) {
+        fillLight.intensity = options.fillLightIntensity;
+      }
+    }
+
+    console.log('🌅 光照已调整:', options);
   }
 
   /**

@@ -3,9 +3,10 @@ import { Capsule } from 'three/examples/jsm/math/Capsule.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GlobalState } from '../types/GlobalState';
 import { BVHPhysics } from '../physics/BVHPhysics';
-import { Ball } from './Ball';
+import { Egg } from './Egg';
 import { KeyBoardMessageManager } from '@/ImperativeComponents/keyBoardMessage';
 import { doorGroups } from './architecture/doors';
+import { filterColliders } from '@/utils/3d-chat/filterColliders';
 // 基础模型类 - 完全基于BVH物理系统
 export abstract class Model {
   abstract mesh: THREE.Object3D;
@@ -70,11 +71,10 @@ export abstract class Model {
   private tempVector = new THREE.Vector3();
   private tempVector2 = new THREE.Vector3();
 
-  // 右键发射小球功能相关
-  private spheres: Ball[] = [];
-  private sphereParams = {
-    sphereSize: 1,
-    maxSpheres: 50 // 最大小球数量，防止内存泄漏
+  // 右键发射鸡蛋功能相关
+  private eggs: Egg[] = [];
+  private eggParams = {
+    maxEggs: 30 // 最大鸡蛋数量，防止内存泄漏
   };
 
   //门与模型缓存
@@ -449,9 +449,6 @@ export abstract class Model {
   private performSeparateCollidersDetection(delta: number,screen:THREE.Scene): void {
     if (!this.bvhPhysics) return;
 
-    // 🚀 性能监控开始
-    const startTime = performance.now();
-
     const colliders = this.bvhPhysics.getColliders();
     const colliderMapping = this.bvhPhysics.getColliderMapping();
 
@@ -472,59 +469,12 @@ export abstract class Model {
 
     let totalDeltaVector = new THREE.Vector3();
     let hasCollision = false;
-    let hasGroundCollision = false; // 🚀 直接在循环中检测地面碰撞
     let collisionInfo: Array<{ objectId: string; object: any; deltaVector: THREE.Vector3 }> = [];
 
-    colliders.forEach((collider, objectId) => {
-      // 🚀 距离预筛选优化：根据碰撞体类型使用不同的筛选策略
-      const playerPosition = this.mesh.position;
-      if(objectId.startsWith('school')){
-        if (objectId.startsWith('school-building-region-region')) {
-          // 🏗️ 区域BVH：判断玩家是否在区块内或距离区块边界100单位内
-          debugger
-          const colliderBounds = new THREE.Box3().setFromObject(collider);
-  
-          // 检查玩家位置是否在区块边界内
-          const isInside = colliderBounds.containsPoint(playerPosition);
-  
-          // 如果不在区块内，检查是否在100单位范围内
-          let isNearby = false;
-          const distanceToBox = colliderBounds.distanceToPoint(playerPosition);
-          if (!isInside) {
-            isNearby = distanceToBox <= 100;
-          }
-  
-          if (isInside || isNearby) {
-            this.mapUserPositionDistance.set(objectId, collider);
-          }else if(!isInside && distanceToBox > 200){
-            this.mapUserPositionDistance.delete(objectId);
-          }
-        } else {
-          // 🎯 其他碰撞体：判断到中心点的距离
-          const colliderBounds = new THREE.Box3().setFromObject(collider);
-          const colliderCenter = colliderBounds.getCenter(new THREE.Vector3());
-          const distance = colliderCenter.distanceTo(playerPosition);
-  
-          if (distance < 100) {
-            this.mapUserPositionDistance.set(objectId, collider);
-          }else if(distance > 200){
-            this.mapUserPositionDistance.delete(objectId);
-          }
-        }
-      }else{
-        this.mapUserPositionDistance.set(objectId, collider);
-      }
-    });
-    if (Math.random() < 0.016) { // 约60fps时每秒一次
-      console.log(this.mapUserPositionDistance,this.mesh.position);
-    }
-    debugger
-    // 对每个分离的碰撞体进行检测
-    // this.mapUserPositionDistance.forEach((collider, objectId) => {
+    filterColliders(colliders,this.mapUserPositionDistance,this.mesh.position)
 
     this.mapUserPositionDistance.forEach((collider, objectId) => {
       if (!collider.geometry || !(collider.geometry as any).boundsTree) return;
-      debugger
       // 重置临时变量
       tempBox.makeEmpty();
       tempMat.copy(collider.matrixWorld).invert();
@@ -546,6 +496,7 @@ export abstract class Model {
       let colliderHasCollision = false;
 
       // BVH碰撞检测 - 🚀 添加boundsTraverseOrder优化遍历顺序
+      //TODO: OPEDNDOOR弹出消息窗口创建不正常
       (collider.geometry as any).boundsTree.shapecast({
         intersectsBounds: (box: THREE.Box3) => box.intersectsBox(tempBox),
 
@@ -690,14 +641,6 @@ export abstract class Model {
       this.onPlayerCollision(collisionInfo);
     }
 
-    // 🚀 性能监控结束
-    const endTime = performance.now();
-    const executionTime = endTime - startTime;
-
-    // 每秒记录一次性能统计
-    if (Math.random() < 0.016) { // 约60fps时每秒一次
-      console.log(`⚡ BVH碰撞检测性能: ${executionTime.toFixed(2)}ms, 检测了 ${colliders.size} 个碰撞体`);
-    }
   }
 
 
@@ -759,7 +702,7 @@ export abstract class Model {
    * 创建跟随相机 - 创建一个跟随模型的相机
    */
   public createLookCamera(scene: THREE.Scene): THREE.PerspectiveCamera {
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 5, 800);
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 5, 1000);
     const cameraHelper = new THREE.CameraHelper(camera);
 
     // 设置相机位置
@@ -954,83 +897,98 @@ export abstract class Model {
     }
   }
 
-  // ==================== 右键发射小球功能 ====================
+  // ==================== 右键发射鸡蛋功能 ====================
 
   /**
-   * 发射小球（由外部调用，不处理事件）
+   * 发射鸡蛋（由外部调用，不处理事件）
    * @param camera 相机对象
    * @param scene 场景对象
    * @param mouseX 鼠标X坐标（标准化设备坐标）
    * @param mouseY 鼠标Y坐标（标准化设备坐标）
    */
-  public shootSphere(camera: THREE.Camera, scene: THREE.Scene, mouseX: number, mouseY: number): void {
+  public shootEgg(camera: THREE.Camera, scene: THREE.Scene, mouseX: number, mouseY: number): void {
     if (!this.bvhPhysics) {
-      console.warn('❌ BVH物理系统未初始化，无法发射小球');
+      console.warn('❌ BVH物理系统未初始化，无法发射鸡蛋');
       return;
     }
-    const ball = new Ball(scene, this.bvhPhysics);
-    ball.shoot(camera, mouseX, mouseY);
-    this.spheres.push(ball)
+    const egg = new Egg(scene, this.bvhPhysics);
+
+    // 等待鸡蛋模型加载完成后再发射
+    const waitForEggReady = () => {
+      if (egg.isReady()) {
+        egg.shoot(camera, mouseX, mouseY);
+        this.eggs.push(egg);
+
+        // 限制鸡蛋数量，防止内存泄漏
+        if (this.eggs.length > this.eggParams.maxEggs) {
+          const oldEgg = this.eggs.shift();
+          if (oldEgg) {
+            oldEgg.removeEgg();
+          }
+        }
+      } else {
+        // 如果模型还没加载完成，等待50ms后重试
+        setTimeout(waitForEggReady, 50);
+      }
+    };
+
+    waitForEggReady();
   }
 
   /**
-   * 更新所有发射的小球物理状态
+   * 更新所有发射的鸡蛋物理状态
    * @param delta 时间增量
    * @param camera 相机对象（用于视野检测优化）
    */
-  public updateProjectileSpheres(delta: number, camera?: THREE.Camera): void {
+  public updateProjectileEggs(delta: number, camera?: THREE.Camera): void {
     if (!this.bvhPhysics) return;
 
-    for (let i = 0; i < this.spheres.length; i++) {
-      const ball = this.spheres[i];
-      const isSuccess = ball.updateProjectileSphere(delta, camera);
+    for (let i = 0; i < this.eggs.length; i++) {
+      const egg = this.eggs[i];
+      const isSuccess = egg.updateProjectileEgg(delta, camera);
       if(!isSuccess){
-        ball.removeSphere();
-        this.spheres.splice(i, 1);
+        egg.removeEgg();
+        this.eggs.splice(i, 1);
         i--;
       }
     }
   }
 
   /**
-   * 清理所有发射的小球
+   * 清理所有发射的鸡蛋
    * @param scene 场景对象
    */
-  public clearAllSpheres(scene: THREE.Scene): void {
-    this.spheres.forEach(ball => {
-      scene.remove(ball.sphere);
-      ball.sphere.geometry.dispose();
-      if (ball.sphere.material instanceof THREE.Material) {
-        ball.sphere.material.dispose();
-      }
+  public clearAllEggs(scene: THREE.Scene): void {
+    this.eggs.forEach(egg => {
+      egg.removeEgg();
     });
-    this.spheres.length = 0;
-    console.log('🧹 已清理所有发射的小球');
+    this.eggs.length = 0;
+    console.log('🧹 已清理所有发射的鸡蛋');
   }
 
   /**
-   * 清理小球资源
+   * 清理鸡蛋资源
    * @param scene 场景对象
    */
-  public disposeSphereShooter(scene: THREE.Scene): void {
-    // 清理所有小球
-    this.clearAllSpheres(scene);
-    console.log('🗑️ 小球资源已清理');
+  public disposeEggShooter(scene: THREE.Scene): void {
+    // 清理所有鸡蛋
+    this.clearAllEggs(scene);
+    console.log('🗑️ 鸡蛋资源已清理');
   }
 
   /**
-   * 获取当前小球数量
+   * 获取当前鸡蛋数量
    */
-  public getSphereCount(): number {
-    return this.spheres.length;
+  public getEggCount(): number {
+    return this.eggs.length;
   }
 
   /**
-   * 设置小球参数
-   * @param params 小球参数
+   * 设置鸡蛋参数
+   * @param params 鸡蛋参数
    */
-  public setSphereParams(params: Partial<typeof this.sphereParams>): void {
-    Object.assign(this.sphereParams, params);
-    console.log('⚙️ 小球参数已更新:', this.sphereParams);
+  public setEggParams(params: Partial<typeof this.eggParams>): void {
+    Object.assign(this.eggParams, params);
+    console.log('⚙️ 鸡蛋参数已更新:', this.eggParams);
   }
 }

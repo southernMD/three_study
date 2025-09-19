@@ -6,6 +6,7 @@ import { Ground } from '../architecture/Ground';
 import { BaseModel } from '../architecture/BaseModel';
 import { PHYSICS_CONSTANTS } from '../../constants/PhysicsConstants';
 import { Tree } from '../architecture/Tree';
+import { Egg } from '../Egg';
 
 /**
  * 对象管理器 - 统一管理所有静态模型对象
@@ -47,6 +48,8 @@ export class ObjectManager {
 
     // 直接创建边界墙体
     await this.createBoundaryWalls();
+
+    await this.createEgg()
     this.isCreated = true;
   }
 
@@ -525,5 +528,14 @@ export class ObjectManager {
       stats[type] = (stats[type] || 0) + 1;
     }
     return stats;
+  }
+
+  // ==================== 鸡蛋模型管理 ====================
+
+  /**
+   * 预加载鸡蛋模型（调用Egg类的静态方法）
+   */
+  async createEgg(): Promise<void> {
+    await Egg.createEgg();
   }
 }

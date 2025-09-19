@@ -14,6 +14,7 @@ import { ObjectManager } from '../models/managers/ObjectManager';
 import { PHYSICS_CONSTANTS, getGroundFullSize } from '../constants/PhysicsConstants';
 import { GlobalState } from '../types/GlobalState';
 import { BVHPhysics } from '../physics/BVHPhysics';
+import { Egg } from '../models/Egg';
 
 import Stats from 'stats.js';
 
@@ -84,26 +85,36 @@ const guiFn = {
   forceStand: () => {
     mmdModelManager.forceStand();
   },
-  // 清理所有发射的小球
-  clearSpheres: () => {
+  // 清理所有发射的鸡蛋
+  clearEggs: () => {
     if (mmdModelManager && mmdModelManager.isModelLoaded()) {
       const model = mmdModelManager.getModel();
       if (model) {
-        model.clearAllSpheres(scene);
+        model.clearAllEggs(scene);
       }
     }
   },
-  // 获取当前小球数量
-  getSphereCount: () => {
+  // 获取当前鸡蛋数量
+  getEggCount: () => {
     if (mmdModelManager && mmdModelManager.isModelLoaded()) {
       const model = mmdModelManager.getModel();
       if (model) {
-        const count = model.getSphereCount();
-        console.log(`当前小球数量: ${count}`);
+        const count = model.getEggCount();
+        console.log(`当前鸡蛋数量: ${count}`);
         return count;
       }
     }
     return 0;
+  },
+  // 检查鸡蛋模型状态
+  checkEggStatus: () => {
+    const status = Egg.getEggStatus();
+    const isReady = Egg.isEggReady();
+    console.log('🥚 鸡蛋模型状态:', {
+      ready: isReady,
+      ...status
+    });
+    return status;
   },
   // 切换树的碰撞体显示
   toggleTreeColliders: () => {
@@ -387,14 +398,15 @@ gui.add(guiFn, 'forceStand').name('播放站立动画')
 gui.add(guiFn, 'createBoxHere').name('在当前位置创建箱子')
 gui.add(guiFn, 'createFallingBoxesNow').name('创建掉落的盒子')
 
-// 小球发射功能
-const sphereFolder = gui.addFolder('小球发射功能')
-sphereFolder.add(guiFn, 'clearSpheres').name('清理所有小球')
-sphereFolder.add(guiFn, 'getSphereCount').name('显示小球数量')
-sphereFolder.add(guiFn, 'toggleTreeColliders').name('切换树碰撞体显示')
-sphereFolder.add(guiFn, 'toggleDoorColliders').name('切换门碰撞体启用/禁用')
-sphereFolder.add({ info: '右键点击屏幕发射小球' }, 'info').name('使用说明').listen()
-sphereFolder.open()
+// 鸡蛋发射功能
+const eggFolder = gui.addFolder('🥚 鸡蛋发射功能')
+eggFolder.add(guiFn, 'clearEggs').name('清理所有鸡蛋')
+eggFolder.add(guiFn, 'getEggCount').name('显示鸡蛋数量')
+eggFolder.add(guiFn, 'checkEggStatus').name('检查鸡蛋模型状态')
+eggFolder.add(guiFn, 'toggleTreeColliders').name('切换树碰撞体显示')
+eggFolder.add(guiFn, 'toggleDoorColliders').name('切换门碰撞体启用/禁用')
+eggFolder.add({ info: '右键点击屏幕发射鸡蛋，碰撞时会破碎' }, 'info').name('使用说明').listen()
+eggFolder.open()
 
 
 // 对象管理器控制
@@ -595,7 +607,15 @@ onMounted(async () => {
     renderer = sceneManager.createRenderer(dom.value, width, height);
 
     // 初始化灯光
-    sceneManager.initializeLights();
+    sceneManager.initializeLights(); // 🌅 重新启用优化后的光照
+
+    // 🎨 针对天空图环境进行光照微调
+    // 你可以调整这些数值来获得最佳效果
+    sceneManager.adjustLightingForSkybox({
+      mainLightIntensity: 0.5,    // 主光源强度 (0.3-0.8)
+      ambientLightIntensity: 1.0, // 环境光强度 (0.8-1.5)
+      fillLightIntensity: 0.25    // 补充光强度 (0.1-0.4)
+    });
 
     // 创建场景控制器
     const controls = sceneManager.createSceneControls();
@@ -677,11 +697,11 @@ onMounted(async () => {
         const mouseX = (event.clientX / window.innerWidth) * 2 - 1;
         const mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
 
-        // 发射小球
+        // 发射鸡蛋
         if (mmdModelManager && mmdModelManager.isModelLoaded()) {
           const model = mmdModelManager.getModel();
           if (model && hadRenderCamera) {
-            model.shootSphere(hadRenderCamera, scene, mouseX, mouseY);
+            model.shootEgg(hadRenderCamera, scene, mouseX, mouseY);
           }
         }
       }
@@ -713,11 +733,11 @@ onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown);
   window.removeEventListener('keyup', handleKeyUp);
 
-  // 清理小球资源
+  // 清理鸡蛋资源
   if (mmdModelManager && mmdModelManager.isModelLoaded()) {
     const model = mmdModelManager.getModel();
     if (model) {
-      model.disposeSphereShooter(scene);
+      model.disposeEggShooter(scene);
     }
   }
 
@@ -786,8 +806,8 @@ function animate(timestamp?: number) {
       // 使用BVH物理系统更新模型
       model.updateMovement(scene);
 
-      // 更新发射的小球物理（传递相机进行视野优化）
-      model.updateProjectileSpheres(1/60, hadRenderCamera);
+      // 更新发射的鸡蛋物理（传递相机进行视野优化）
+      model.updateProjectileEggs(1/60, hadRenderCamera);
 
       // 只在需要调试时才更新辅助器（包围盒、胶囊体等）
       // 注释掉这些行可以提高性能
@@ -825,6 +845,37 @@ window.addEventListener('resize', function () {
 function handleKeyDown(event: KeyboardEvent) {
   if (mmdModelManager) {
     mmdModelManager.handleKeyDown(event);
+  }
+
+  // 🎨 光照调整快捷键 (需要按住Ctrl)
+  if (event.ctrlKey && sceneManager) {
+    switch(event.key) {
+      case '1': // Ctrl+1: 降低主光源
+        sceneManager.adjustLightingForSkybox({ mainLightIntensity: 0.3 });
+        break;
+      case '2': // Ctrl+2: 中等主光源
+        sceneManager.adjustLightingForSkybox({ mainLightIntensity: 0.5 });
+        break;
+      case '3': // Ctrl+3: 增强主光源
+        sceneManager.adjustLightingForSkybox({ mainLightIntensity: 0.7 });
+        break;
+      case '4': // Ctrl+4: 降低环境光
+        sceneManager.adjustLightingForSkybox({ ambientLightIntensity: 0.8 });
+        break;
+      case '5': // Ctrl+5: 中等环境光
+        sceneManager.adjustLightingForSkybox({ ambientLightIntensity: 1.0 });
+        break;
+      case '6': // Ctrl+6: 增强环境光
+        sceneManager.adjustLightingForSkybox({ ambientLightIntensity: 1.3 });
+        break;
+      case '7': // Ctrl+7: 平衡设置
+        sceneManager.adjustLightingForSkybox({
+          mainLightIntensity: 0.5,
+          ambientLightIntensity: 1.0,
+          fillLightIntensity: 0.25
+        });
+        break;
+    }
   }
 }
 
